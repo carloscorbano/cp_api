@@ -7,6 +7,8 @@ add_library(cp_api STATIC
     src/core/diagnostics.cpp
     src/core/events.cpp
     src/core/math.cpp
+    src/core/delegate.cpp
+    src/core/hybridEvents.cpp
 )
 
 include(CTest)
