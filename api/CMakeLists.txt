@@ -9,6 +9,9 @@ add_library(cp_api STATIC
     src/core/math.cpp
     src/core/delegate.cpp
     src/core/hybridEvents.cpp
+    src/core/algorithm.cpp
+    src/core/security.cpp
+    src/core/compression.cpp
 )
 
 include(CTest)
@@ -22,8 +25,19 @@ target_include_directories(cp_api PUBLIC include)
 
 find_package(fmt CONFIG REQUIRED)
 find_package(glm CONFIG REQUIRED)
+find_package(MbedTLS CONFIG REQUIRED)
+find_package(nlohmann_json CONFIG REQUIRED)
+find_package(Vulkan)
+find_package(VulkanHeaders CONFIG)
+find_package(VulkanMemoryAllocator CONFIG REQUIRED)
+find_package(ZLIB REQUIRED)
 
 target_link_libraries(cp_api 
+    PRIVATE
+        MbedTLS::mbedtls
+        nlohmann_json::nlohmann_json
+        Vulkan::Vulkan Vulkan::Headers GPUOpen::VulkanMemoryAllocator
+        ZLIB::ZLIB
     PUBLIC
         fmt::fmt
         glm::glm
