@@ -12,6 +12,8 @@ add_library(cp_api STATIC
     src/core/algorithm.cpp
     src/core/security.cpp
     src/core/compression.cpp
+    src/core/filesystem.cpp
+    src/core/threadPool.cpp
 )
 
 include(CTest)
