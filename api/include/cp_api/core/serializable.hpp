@@ -1,154 +1,159 @@
 #pragma once
-#include <nlohmann/json.hpp>
-#include <string>
-#include <fstream>
-#include <vector>
-#include <functional>
-#include <type_traits>
-#include <iostream>
 
-/**
- * EXEMPLO DE USO DO ARQUIVO:
- * @code
- *   #include "serializable.hpp"
- *   #include <string>
- *   #include <vector>
- *
- *   struct Stats : public cp_api::SerializableBase {
- *       int strength = 10;
- *       int agility = 8;
- *
- *       Stats() {
- *           RegisterField(SERIALIZABLE_FIELD(strength));
- *           RegisterField(SERIALIZABLE_FIELD(agility));
- *       }
- *   };
- *
- *   struct Player : public cp_api::SerializableBase {
- *       std::string name = "Hero";
- *       int level = 1;
- *       Stats stats;
- *       std::vector<Stats> inventory; // array de objetos serializáveis
- *
- *       Player() {
- *           RegisterField(SERIALIZABLE_FIELD(name));
- *           RegisterField(SERIALIZABLE_FIELD(level));
- *           RegisterField(SERIALIZABLE_FIELD(stats));
- *           RegisterField(SERIALIZABLE_FIELD(inventory));
- *       }
- *   };
- */
+#include <string>
+#include <vector>
+#include <array>
+#include <map>
+#include <unordered_map>
+#include <optional>
+#include <memory>
+#include <type_traits>
+#include <functional>
+#include <nlohmann/json.hpp>
 
 namespace cp_api {
 
-// ---------------------------
-// Interface base para todos os objetos serializáveis
-// ---------------------------
-class ISerializable {
-public:
-    virtual ~ISerializable() = default;
-    virtual nlohmann::json Serialize() const = 0;
-    virtual void Deserialize(const nlohmann::json& j) = 0;
-};
+    class SerializableBase {
+    public:
+        virtual ~SerializableBase() = default;
 
-// ---------------------------
-// Helpers JSON / BSON
-// ---------------------------
-inline bool SaveJsonToFile(const ISerializable& obj, const std::string& path, bool pretty = true) {
-    try {
-        std::ofstream file(path);
-        if (!file.is_open()) return false;
-        nlohmann::json j = obj.Serialize();
-        file << (pretty ? j.dump(4) : j.dump());
-        return true;
-    } catch (const std::exception& e) { std::cerr << e.what(); return false; }
-}
-
-inline bool LoadJsonFromFile(ISerializable& obj, const std::string& path) {
-    try {
-        std::ifstream file(path);
-        if (!file.is_open()) return false;
-        nlohmann::json j;
-        file >> j;
-        obj.Deserialize(j);
-        return true;
-    } catch (const std::exception& e) { std::cerr << e.what(); return false; }
-}
-
-inline bool SaveBsonToFile(const ISerializable& obj, const std::string& path) {
-    try {
-        std::ofstream file(path, std::ios::binary);
-        if (!file.is_open()) return false;
-        auto bsonData = nlohmann::json::to_bson(obj.Serialize());
-        file.write(reinterpret_cast<const char*>(bsonData.data()), bsonData.size());
-        return true;
-    } catch (const std::exception& e) { std::cerr << e.what(); return false; }
-}
-
-inline bool LoadBsonFromFile(ISerializable& obj, const std::string& path) {
-    try {
-        std::ifstream file(path, std::ios::binary | std::ios::ate);
-        if (!file.is_open()) return false;
-        std::streamsize size = file.tellg();
-        file.seekg(0, std::ios::beg);
-        std::vector<uint8_t> buffer(size);
-        file.read(reinterpret_cast<char*>(buffer.data()), size);
-        nlohmann::json j = nlohmann::json::from_bson(buffer);
-        obj.Deserialize(j);
-        return true;
-    } catch (const std::exception& e) { std::cerr << e.what(); return false; }
-}
-
-// ---------------------------
-// Classe base para objetos com campos registrados
-// ---------------------------
-class SerializableBase : public ISerializable {
-public:
-    using Getter = std::function<nlohmann::json()>;
-    using Setter = std::function<void(const nlohmann::json&)>;
-    struct Field { std::string name; Getter getter; Setter setter; };
-
-    nlohmann::json Serialize() const override {
-        nlohmann::json j;
-        for (const auto& f : m_fields) j[f.name] = f.getter();
-        return j;
-    }
-
-    void Deserialize(const nlohmann::json& j) override {
-        for (const auto& f : m_fields) {
-            if (j.contains(f.name)) f.setter(j[f.name]);
+        // --------------------------
+        // Registro de campos
+        // --------------------------
+        template<typename T>
+        void RegisterField(const std::string& name, T& field) {
+            m_fields[name] = [&field]() -> nlohmann::json {
+                return SerializeField(field);
+            };
+            m_deserializers[name] = [&field](const nlohmann::json& j) {
+                DeserializeField(field, j);
+            };
         }
-    }
 
-protected:
-    void RegisterField(const Field& f) { m_fields.push_back(f); }
-
-    template<typename T>
-    static nlohmann::json SerializeField(const T& value) {
-        if constexpr (std::is_base_of_v<ISerializable, T>) {
-            return value.Serialize(); // aninhamento recursivo
-        } else {
-            return value;
+        // Serializa todos os campos para JSON
+        nlohmann::json Serialize() const {
+            nlohmann::json j;
+            for (auto& [name, getter] : m_fields) {
+                j[name] = getter();
+            }
+            return j;
         }
-    }
 
-    template<typename T>
-    static void DeserializeField(T& value, const nlohmann::json& j) {
-        if constexpr (std::is_base_of_v<ISerializable, T>) {
-            value.Deserialize(j);
-        } else {
-            value = j.get<T>();
+        // Serializa todos os campos para BSON
+        std::vector<uint8_t> SerializeBSON() const {
+            return nlohmann::json::to_bson(Serialize());
         }
-    }
 
-    std::vector<Field> m_fields;
-};
+        // Desserializa todos os campos de JSON
+        void Deserialize(const nlohmann::json& j) {
+            for (auto& [name, setter] : m_deserializers) {
+                if (j.contains(name)) {
+                    setter(j.at(name));
+                }
+            }
+        }
 
-// ---------------------------
-// Macro para facilitar registro de campos
-// ---------------------------
-#define SERIALIZABLE_FIELD(name) \
-    { #name, [&]() -> nlohmann::json { return SerializableBase::SerializeField(name); }, \
-             [&](const nlohmann::json& j) { SerializableBase::DeserializeField(name, j); } }
+        // Desserializa todos os campos de BSON
+        void DeserializeBSON(const std::vector<uint8_t>& data) {
+            Deserialize(nlohmann::json::from_bson(data));
+        }
+
+    protected:
+        // --------------------------
+        // Serialização genérica
+        // --------------------------
+        template<typename T>
+        static nlohmann::json SerializeField(const T& value) {
+            if constexpr (std::is_base_of<SerializableBase, T>::value) {
+                return value.Serialize();
+            } else if constexpr (is_vector<T>::value || is_array<T>::value) {
+                nlohmann::json arr = nlohmann::json::array();
+                for (const auto& el : value) {
+                    arr.push_back(SerializeField(el));
+                }
+                return arr;
+            } else if constexpr (is_map<T>::value || is_unordered_map<T>::value) {
+                nlohmann::json obj = nlohmann::json::object();
+                for (const auto& [k, v] : value) {
+                    obj[k] = SerializeField(v);
+                }
+                return obj;
+            } else if constexpr (is_optional<T>::value) {
+                if (value.has_value()) return SerializeField(*value);
+                else return nullptr;
+            } else if constexpr (is_unique_ptr<T>::value) {
+                if (value) return SerializeField(*value);
+                else return nullptr;
+            } else {
+                return value;
+            }
+        }
+
+        template<typename T>
+        static void DeserializeField(T& field, const nlohmann::json& j) {
+            if constexpr (std::is_base_of<SerializableBase, T>::value) {
+                field.Deserialize(j);
+            } else if constexpr (is_vector<T>::value) {
+                field.clear();
+                for (const auto& el : j) {
+                    typename T::value_type tmp;
+                    DeserializeField(tmp, el);
+                    field.push_back(std::move(tmp));
+                }
+            } else if constexpr (is_array<T>::value) {
+                size_t idx = 0;
+                for (const auto& el : j) {
+                    DeserializeField(field[idx++], el);
+                }
+            } else if constexpr (is_map<T>::value || is_unordered_map<T>::value) {
+                field.clear();
+                for (auto it = j.begin(); it != j.end(); ++it) {
+                    typename T::mapped_type tmp;
+                    DeserializeField(tmp, it.value());
+                    field[it.key()] = std::move(tmp);
+                }
+            } else if constexpr (is_optional<T>::value) {
+                if (j.is_null()) field.reset();
+                else {
+                    typename T::value_type tmp;
+                    DeserializeField(tmp, j);
+                    field = std::move(tmp);
+                }
+            } else if constexpr (is_unique_ptr<T>::value) {
+                if (j.is_null()) field.reset();
+                else {
+                    field = std::make_unique<typename T::element_type>();
+                    DeserializeField(*field, j);
+                }
+            } else {
+                field = j.get<T>();
+            }
+        }
+
+    private:
+        std::unordered_map<std::string, std::function<nlohmann::json()>> m_fields;
+        std::unordered_map<std::string, std::function<void(const nlohmann::json&)>> m_deserializers;
+
+        // --------------------------
+        // Traits auxiliares
+        // --------------------------
+        template<typename T> struct is_vector : std::false_type {};
+        template<typename... Args> struct is_vector<std::vector<Args...>> : std::true_type {};
+
+        template<typename T> struct is_array : std::false_type {};
+        template<typename U, std::size_t N> struct is_array<std::array<U, N>> : std::true_type {};
+
+        template<typename T> struct is_map : std::false_type {};
+        template<typename... Args> struct is_map<std::map<Args...>> : std::true_type {};
+
+        template<typename T> struct is_unordered_map : std::false_type {};
+        template<typename... Args> struct is_unordered_map<std::unordered_map<Args...>> : std::true_type {};
+
+        template<typename T> struct is_optional : std::false_type {};
+        template<typename... Args> struct is_optional<std::optional<Args...>> : std::true_type {};
+
+        template<typename T> struct is_unique_ptr : std::false_type {};
+        template<typename U> struct is_unique_ptr<std::unique_ptr<U>> : std::true_type {};
+    };
 
 } // namespace cp_api
