@@ -14,6 +14,7 @@ add_library(cp_api STATIC
     src/core/compression.cpp
     src/core/filesystem.cpp
     src/core/threadPool.cpp
+    src/core/serializable.cpp
 
     src/window/glfw.inc.cpp
     src/window/window.cpp
