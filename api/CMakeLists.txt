@@ -15,12 +15,15 @@ add_library(cp_api STATIC
     src/core/filesystem.cpp
     src/core/threadPool.cpp
     src/core/serializable.cpp
+    src/core/stb.inc.cpp
 
     src/window/glfw.inc.cpp
     src/window/window.cpp
     src/window/renderer.cpp
     src/window/inputManager.cpp
     
+    src/containers/ntree.cpp
+    src/containers/spatialTree.cpp
 )
 
 include(CTest)
@@ -41,6 +44,7 @@ find_package(VulkanHeaders CONFIG)
 find_package(VulkanMemoryAllocator CONFIG REQUIRED)
 find_package(ZLIB REQUIRED)
 find_package(glfw3 CONFIG REQUIRED)
+find_package(Stb REQUIRED)
 
 target_link_libraries(cp_api 
     PRIVATE
@@ -53,3 +57,5 @@ target_link_libraries(cp_api
         fmt::fmt
         glm::glm
 )
+
+target_include_directories(cp_api PRIVATE ${Stb_INCLUDE_DIR})

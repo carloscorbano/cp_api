@@ -1,6 +1,7 @@
 {
   "dependencies": [
     "fmt",
+    "glfw3",
     "glm",
     "mbedtls",
     "nlohmann-json",
@@ -8,6 +9,6 @@
     "vulkan-headers",
     "vulkan-memory-allocator",
     "zlib",
-    "glfw3"
+    "stb"
   ]
 }

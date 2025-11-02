@@ -17,91 +17,50 @@
 //     return 0;
 // }
 
-#include "cp_api/core/serializable.hpp"
 #include <iostream>
-
-struct Stats : cp_api::SerializableBase {
-    int hp = 0;
-    int mp = 0;
-
-    Stats() = default;
-    Stats(int h, int m) : hp(h), mp(m) {}
-
-    void RegisterFields() {
-        RegisterField("hp", hp);
-        RegisterField("mp", mp);
-    }
-};
-
-struct Player : cp_api::SerializableBase {
-    std::string name;
-    int level = 1;
-    std::vector<Stats> stats_history;
-    std::unordered_map<std::string, Stats> current_stats;
-    std::optional<Stats> optional_stats;
-    std::unique_ptr<Stats> ptr_stats;
-
-    void RegisterFields() {
-        RegisterField("name", name);
-        RegisterField("level", level);
-        RegisterField("stats_history", stats_history);
-        RegisterField("current_stats", current_stats);
-        RegisterField("optional_stats", optional_stats);
-        RegisterField("ptr_stats", ptr_stats);
-    }
-};
+#include <cp_api/containers/spatialTree2D.hpp>
+#include <cp_api/containers/spatialTree3D.hpp>
 
 int main() {
-    Player p;
-    p.name = "Carlos";
-    p.level = 10;
+     using namespace cp_api;
 
-    // Preenchendo vetor
-    Stats s1(100, 50);
-    Stats s2(120, 60);
-    s1.RegisterFields();
-    s2.RegisterFields();
-    p.stats_history.push_back(s1);
-    p.stats_history.push_back(s2);
+    std::cout << "=== SpatialTree 2D ===\n";
+    // Cria uma árvore 2D com área de 0,0 a 10,10
+    AABB2 bounds2D({0,0}, {10,10});
+    SpatialTree2D tree2D(bounds2D);
 
-    // Preenchendo unordered_map
-    Stats s3(80, 40);
-    s3.RegisterFields();
-    p.current_stats["base"] = s3;
-
-    // optional
-    Stats s4(90, 45);
-    s4.RegisterFields();
-    p.optional_stats = s4;
-
-    // unique_ptr
-    p.ptr_stats = std::make_unique<Stats>(Stats(200, 100));
-    p.ptr_stats->RegisterFields();
-
-    // Registrando campos do player
-    p.RegisterFields();
-
-    // Serializando
-    nlohmann::json j = p.Serialize();
-    std::cout << "JSON:\n" << j.dump(4) << "\n";
-
-    // Serializando para BSON
-    auto bson_data = p.SerializeBSON();
-    std::cout << "BSON size: " << bson_data.size() << " bytes\n";
-
-    // Desserializando
-    Player p2;
-    p2.RegisterFields();
-    p2.Deserialize(j);
-    std::cout << "Player name after deserialization: " << p2.name << "\n";
-    std::cout << "Level: " << p2.level << "\n";
-    std::cout << "Stats history size: " << p2.stats_history.size() << "\n";
-    if (p2.optional_stats.has_value()) {
-        std::cout << "Optional HP: " << p2.optional_stats->hp << "\n";
+    // Inserção de itens 2D
+    std::vector<Vec2> items2D = {{1,1}, {5,5}, {8,2}};
+    for (int i = 0; i < items2D.size(); ++i) {
+        tree2D.Insert(i, AABB2(items2D[i], items2D[i])); // ponto como AABB min=max
     }
-    if (p2.ptr_stats) {
-        std::cout << "Ptr Stats HP: " << p2.ptr_stats->hp << "\n";
+
+    // QueryRange 2D
+    AABB2 queryArea2D({0,0}, {6,6});
+    std::vector<uint32_t> ids;
+    tree2D.QueryRange(queryArea2D, ids);
+    std::cout << "QueryRange encontrou " << ids.size() << " itens 2D\n";
+    for (auto idx : ids)
+        std::cout << " - item " << idx << "\n";
+
+    std::cout << "\n=== SpatialTree 3D ===\n";
+    // Cria uma árvore 3D com área de 0,0,0 a 10,10,10
+    AABB3 bounds3D({0,0,0}, {10,10,10});
+    SpatialTree3D tree3D(bounds3D);
+
+    // Inserção de itens 3D
+    std::vector<Vec3> items3D = {{1,1,1}, {5,5,5}, {8,2,3}};
+    for (int i = 0; i < items3D.size(); ++i) {
+        tree3D.Insert(i, AABB3(items3D[i], items3D[i])); // ponto como AABB min=max
     }
+
+    // QueryRange 3D
+    AABB3 queryArea3D({0,0,0}, {8,6,6});
+    std::vector<uint32_t> ids2;
+    tree3D.QueryRange(queryArea3D, ids2);
+    std::cout << "QueryRange encontrou " << ids2.size() << " itens 3D\n";
+    for (auto idx : ids2)
+        std::cout << " - item " << idx << "\n";
 
     return 0;
 }
