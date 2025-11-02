@@ -14,6 +14,12 @@ add_library(cp_api STATIC
     src/core/compression.cpp
     src/core/filesystem.cpp
     src/core/threadPool.cpp
+
+    src/window/glfw.inc.cpp
+    src/window/window.cpp
+    src/window/renderer.cpp
+    src/window/inputManager.cpp
+    
 )
 
 include(CTest)
@@ -33,6 +39,7 @@ find_package(Vulkan)
 find_package(VulkanHeaders CONFIG)
 find_package(VulkanMemoryAllocator CONFIG REQUIRED)
 find_package(ZLIB REQUIRED)
+find_package(glfw3 CONFIG REQUIRED)
 
 target_link_libraries(cp_api 
     PRIVATE
@@ -40,6 +47,7 @@ target_link_libraries(cp_api
         nlohmann_json::nlohmann_json
         Vulkan::Vulkan Vulkan::Headers GPUOpen::VulkanMemoryAllocator
         ZLIB::ZLIB
+        glfw
     PUBLIC
         fmt::fmt
         glm::glm
