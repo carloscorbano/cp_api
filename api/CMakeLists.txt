@@ -28,6 +28,8 @@ add_library(cp_api STATIC
     src/physics/spatialTree2D.cpp
     src/physics/spatialTree3D.cpp
     src/physics/terrainCollision.cpp
+
+    src/world/world.cpp
 )
 
 include(CTest)
@@ -49,6 +51,7 @@ find_package(VulkanMemoryAllocator CONFIG REQUIRED)
 find_package(ZLIB REQUIRED)
 find_package(glfw3 CONFIG REQUIRED)
 find_package(Stb REQUIRED)
+find_package(EnTT CONFIG REQUIRED)
 
 target_link_libraries(cp_api 
     PRIVATE
@@ -56,6 +59,7 @@ target_link_libraries(cp_api
         nlohmann_json::nlohmann_json
         Vulkan::Vulkan Vulkan::Headers GPUOpen::VulkanMemoryAllocator
         ZLIB::ZLIB
+        EnTT::EnTT
         glfw
     PUBLIC
         fmt::fmt

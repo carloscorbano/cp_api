@@ -6,6 +6,7 @@
 
 namespace cp_api {
     class Window;
+    class World;
     class Framework {
     public:
         Framework();
@@ -18,5 +19,6 @@ namespace cp_api {
         bool m_isRunning = false;
         std::unique_ptr<Window> m_window;
         std::unique_ptr<DiagnosticsManager> m_diagnostics;
+        std::unique_ptr<World> m_world;
     };
 } // namespace api

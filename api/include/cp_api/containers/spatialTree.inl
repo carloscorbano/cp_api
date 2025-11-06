@@ -27,9 +27,9 @@ cp_api::SpatialTree<VecT,AABBT,RayT,RayHitT,ChildCount>::~SpatialTree() noexcept
 // Public API
 // =============================
 template<typename VecT, typename AABBT, typename RayT, typename RayHitT, int ChildCount>
-void cp_api::SpatialTree<VecT,AABBT,RayT,RayHitT,ChildCount>::Insert(uint32_t id,const AABBT& bounds, uint32_t layer, uint32_t mask)
+void cp_api::SpatialTree<VecT,AABBT,RayT,RayHitT,ChildCount>::Insert(uint32_t id,const AABBT& bounds, uint32_t layer)
 {
-    insert(*m_root, {id, bounds, layer, mask});
+    insert(*m_root, {id, bounds, layer});
     ++m_count;
 }
 
@@ -410,13 +410,12 @@ void cp_api::SpatialTree<VecT,AABBT,RayT,RayHitT,ChildCount>::raycastNode(
     if(!node.bounds.Intersects(ray,tMax)) return;
     for(const auto& e : node.items)
     {
-        if(!((e.mask & ray.mask) && (e.layer & ray.layer))) continue;
+        if(!(e.layer & ray.layerMask)) continue;
 
         RayHitT hit;
         if(e.bounds.Intersects(ray, hit, tMax)) {
             hit.layer = e.layer;
             hit.hitID = e.id;
-            hit.mask = e.mask;
             out.push_back(std::move(hit)); 
         }
     }

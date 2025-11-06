@@ -25,7 +25,6 @@ namespace cp_api {
             uint32_t id;
             AABBT bounds;
             uint32_t layer{0};
-            uint32_t mask{0xFFFFFFFF}; // padrão: colide com tudo
         };
 
         struct Node
@@ -55,7 +54,7 @@ namespace cp_api {
          * @param id Unique object identifier.
          * @param bounds Object bounds.
          */
-        void Insert(uint32_t id,const AABBT& bounds, uint32_t layer = 0, uint32_t mask = 0xFFFFFFFF);
+        void Insert(uint32_t id,const AABBT& bounds, uint32_t layer = 0xFFFFFFFF);
 
         /**
          * @brief Remove an object by ID and bounds.

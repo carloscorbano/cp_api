@@ -95,12 +95,14 @@ namespace cp_api::physics2D {
             hit.point = ray.GetPoint(tmin);
 
             cp_api::math::Vec2 normal(0, 0);
-            if (hitAxis == 0)
-                normal.x = (ray.dir.x > 0.0f) ? -1.0f : 1.0f;
-            else if (hitAxis == 1)
-                normal.y = (ray.dir.y > 0.0f) ? -1.0f : 1.0f;
+            float eps = 1e-4f;
+            if (fabs(hit.point.x - min.x) < eps) normal.x = -1;
+            else if (fabs(hit.point.x - max.x) < eps) normal.x = 1;
 
-            hit.normal = normal;
+            if (fabs(hit.point.y - min.y) < eps) normal.y = -1;
+            else if (fabs(hit.point.y - max.y) < eps) normal.y = 1;
+
+            hit.normal = glm::normalize(normal);
 
             // Preenche layer e collision info no hit
             hit.hitID = 0;
@@ -190,57 +192,60 @@ namespace cp_api::physics3D {
         // Interseção com Ray
         // -------------------------------
         bool Intersects(const Ray& ray, RayHit& hit, float tMax) const {
-            float tmin = 0.0f;
-            float tmax = tMax;
+            float tmin = 0.0f, tmax = tMax;
+            cp_api::math::Vec3 normal(0, 0, 0);
             int hitAxis = -1;
 
+            // Teste de interseção com slab em cada eixo (AABB)
             for (int i = 0; i < 3; i++) {
                 float o = (i == 0) ? ray.origin.x : (i == 1) ? ray.origin.y : ray.origin.z;
-                float d = (i == 0) ? ray.dir.x    : (i == 1) ? ray.dir.y    : ray.dir.z;
-                float minVal = (i == 0) ? min.x   : (i == 1) ? min.y        : min.z;
-                float maxVal = (i == 0) ? max.x   : (i == 1) ? max.y        : max.z;
+                float d = (i == 0) ? ray.dir.x   : (i == 1) ? ray.dir.y   : ray.dir.z;
+                float minVal = (i == 0) ? min.x  : (i == 1) ? min.y      : min.z;
+                float maxVal = (i == 0) ? max.x  : (i == 1) ? max.y      : max.z;
 
                 if (std::fabs(d) < 1e-8f) {
                     if (o < minVal || o > maxVal)
-                        return false; // fora dos limites e paralelo
+                        return false;
                     continue;
                 }
 
                 float invD = 1.0f / d;
                 float t0 = (minVal - o) * invD;
                 float t1 = (maxVal - o) * invD;
-
                 if (invD < 0.0f) std::swap(t0, t1);
 
-                if (t0 > tmin) { 
+                if (t0 > tmin) {
                     tmin = t0;
                     hitAxis = i;
                 }
-
                 tmax = std::min(tmax, t1);
+
                 if (tmax < tmin)
                     return false;
             }
 
             if (tmin < 0.0f)
-                return false; // colisão atrás da origem
+                tmin = 0.0f;
 
-            // Preenche RayHit
             hit.hit = true;
             hit.distance = tmin;
             hit.fraction = tmin / tMax;
             hit.point = ray.GetPoint(tmin);
 
-            // Calcula normal do plano atingido
-            cp_api::math::Vec3 normal(0, 0, 0);
-            if (hitAxis == 0)
-                normal.x = (ray.dir.x > 0.0f) ? -1.0f : 1.0f;
-            else if (hitAxis == 1)
-                normal.y = (ray.dir.y > 0.0f) ? -1.0f : 1.0f;
-            else if (hitAxis == 2)
-                normal.z = (ray.dir.z > 0.0f) ? -1.0f : 1.0f;
+            // --- Cálculo da normal geométrica ---
+            float eps = 1e-4f;
+            if (std::fabs(hit.point.x - min.x) < eps) normal.x = -1;
+            else if (std::fabs(hit.point.x - max.x) < eps) normal.x = 1;
 
-            hit.normal = normal;
+            if (std::fabs(hit.point.y - min.y) < eps) normal.y = -1;
+            else if (std::fabs(hit.point.y - max.y) < eps) normal.y = 1;
+
+            if (std::fabs(hit.point.z - min.z) < eps) normal.z = -1;
+            else if (std::fabs(hit.point.z - max.z) < eps) normal.z = 1;
+
+            // Se atingir canto ou aresta, a normal fica diagonal — normalize.
+            hit.normal = math::Normalize(normal);
+            hit.hitID = 0;
 
             return true;
         }
