@@ -24,6 +24,10 @@ add_library(cp_api STATIC
     
     src/containers/ntree.cpp
     src/containers/spatialTree.cpp
+
+    src/physics/spatialTree2D.cpp
+    src/physics/spatialTree3D.cpp
+    src/physics/terrainCollision.cpp
 )
 
 include(CTest)

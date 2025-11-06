@@ -17,50 +17,44 @@
 //     return 0;
 // }
 
-#include <iostream>
-#include <cp_api/containers/spatialTree2D.hpp>
-#include <cp_api/containers/spatialTree3D.hpp>
+#include <cp_api/core/debug.hpp>
+#include <cp_api/physics/spatialTree2D.hpp>
+#include <cp_api/physics/spatialTree3D.hpp>
 
 int main() {
-     using namespace cp_api;
+    using namespace cp_api;
 
-    std::cout << "=== SpatialTree 2D ===\n";
-    // Cria uma árvore 2D com área de 0,0 a 10,10
-    AABB2 bounds2D({0,0}, {10,10});
-    SpatialTree2D tree2D(bounds2D);
+    physics2D::AABB worldBounds2D({-100,-100}, {100,100});
+    SpatialTree2D tree2D(worldBounds2D);
 
-    // Inserção de itens 2D
-    std::vector<Vec2> items2D = {{1,1}, {5,5}, {8,2}};
-    for (int i = 0; i < items2D.size(); ++i) {
-        tree2D.Insert(i, AABB2(items2D[i], items2D[i])); // ponto como AABB min=max
-    }
+    physics3D::AABB worldBounds3D({-100,-100,-100}, {100,100,100});
+    SpatialTree3D tree3D(worldBounds3D);
 
-    // QueryRange 2D
-    AABB2 queryArea2D({0,0}, {6,6});
-    std::vector<uint32_t> ids;
-    tree2D.QueryRange(queryArea2D, ids);
-    std::cout << "QueryRange encontrou " << ids.size() << " itens 2D\n";
-    for (auto idx : ids)
-        std::cout << " - item " << idx << "\n";
+    tree2D.Insert(100, physics2D::AABB({1,1}, {2,2}), 1, 0xFFFFFFFF);
+    tree2D.Insert(101, physics2D::AABB({3,3}, {4,4}), 1, 0xFFFFFFFF);
+    
+    physics2D::Ray ray({0,0}, {1,1}, 1);
+    std::vector<physics2D::RayHit> hits;
+    tree2D.Raycast(ray, hits, 100.0f);
 
-    std::cout << "\n=== SpatialTree 3D ===\n";
-    // Cria uma árvore 3D com área de 0,0,0 a 10,10,10
-    AABB3 bounds3D({0,0,0}, {10,10,10});
-    SpatialTree3D tree3D(bounds3D);
+    if(hits.empty()) 
+        CP_LOG_WARN("HIT ANYTHING!");
+    else 
+        CP_LOG_WARN("HIT! TOTAL: {}", hits.size());
 
-    // Inserção de itens 3D
-    std::vector<Vec3> items3D = {{1,1,1}, {5,5,5}, {8,2,3}};
-    for (int i = 0; i < items3D.size(); ++i) {
-        tree3D.Insert(i, AABB3(items3D[i], items3D[i])); // ponto como AABB min=max
-    }
 
-    // QueryRange 3D
-    AABB3 queryArea3D({0,0,0}, {8,6,6});
-    std::vector<uint32_t> ids2;
-    tree3D.QueryRange(queryArea3D, ids2);
-    std::cout << "QueryRange encontrou " << ids2.size() << " itens 3D\n";
-    for (auto idx : ids2)
-        std::cout << " - item " << idx << "\n";
+    tree3D.Insert(1, physics3D::AABB({1,1,1}, {2,2,2}), 1);
+    
+    physics3D::Ray ray3D({0,0,0}, {1,1,1}, 1);
+    std::vector<physics3D::RayHit> hits3D;
+    tree3D.Raycast(ray3D, hits3D, 100.0f);
 
+    if(hits3D.empty()) 
+        CP_LOG_WARN("HIT ANYTHING!");
+    else 
+        CP_LOG_WARN("HIT! TOTAL: {}", hits3D.size());
+
+
+    //TODO: arrumar o calculo da normal!
     return 0;
 }

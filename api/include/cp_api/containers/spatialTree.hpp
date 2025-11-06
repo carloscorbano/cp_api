@@ -24,6 +24,8 @@ namespace cp_api {
         {
             uint32_t id;
             AABBT bounds;
+            uint32_t layer{0};
+            uint32_t mask{0xFFFFFFFF}; // padrão: colide com tudo
         };
 
         struct Node
@@ -53,7 +55,7 @@ namespace cp_api {
          * @param id Unique object identifier.
          * @param bounds Object bounds.
          */
-        void Insert(uint32_t id,const AABBT& bounds);
+        void Insert(uint32_t id,const AABBT& bounds, uint32_t layer = 0, uint32_t mask = 0xFFFFFFFF);
 
         /**
          * @brief Remove an object by ID and bounds.
@@ -90,7 +92,7 @@ namespace cp_api {
          * @param range Query bounds.
          * @param outIds Output vector of object IDs.
          */
-        void QueryRange(const AABBT& range,std::vector<uint32_t>& outIds) const;
+        void QueryRange(const AABBT& range,std::vector<uint32_t>& outIds, uint32_t queryMask) const;
 
         /**
          * @brief Query objects containing a point.
@@ -166,7 +168,7 @@ namespace cp_api {
         int childIndexFor(const Node& node,const AABBT& b) const;
         void subdivide(Node& node);
 
-        void query(const Node& node,const AABBT& range,std::vector<uint32_t>& out) const;
+        void query(const Node& node,const AABBT& range,std::vector<uint32_t>& out, uint32_t queryMask) const;
         void queryPointNode(const Node& node,const VecT& p,std::vector<uint32_t>& out) const;
         size_t queryRangeCallbackNode(const Node& node,const AABBT& range,const std::function<bool(uint32_t,const AABBT&)>& cb) const;
 
