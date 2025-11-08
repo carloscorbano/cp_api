@@ -359,7 +359,7 @@ void cp_api::SpatialTree<VecT,AABBT,RayT,RayHitT,ChildCount>::query(
 {
     if(!node.bounds.Intersects(range)) return;
     for(const auto& e : node.items) {
-        if(e.bounds.Intersects(range) && (e.mask & queryMask)) 
+        if(e.bounds.Intersects(range) && (e.layer & queryMask)) 
             out.push_back(e.id);
     }
 

@@ -6,6 +6,7 @@
 #include <limits>
 #include <algorithm>
 #include <nlohmann/json.hpp>
+#include <optional>
 
 namespace cp_api {
     /**
@@ -153,6 +154,91 @@ namespace cp_api {
          * @brief Collect all leaf nodes.
          */
         void GetLeafNodes(std::vector<const Node*>& out) const;
+
+        const std::optional<std::reference_wrapper<const Entry>> FindEntry(uint32_t id) const {
+            const Entry* result = nullptr;
+            Traverse([&](const Entry& e) {
+                if (e.id == id) {
+                    result = &e;
+                    return false; // parar a busca
+                }
+                return true;
+            });
+
+            if(result) return std::cref(*result);
+
+            return std::nullopt;
+        }
+
+
+        std::optional<std::reference_wrapper<Entry>> FindEntryMutable(uint32_t id) {
+            Entry* result = nullptr;
+            TraverseMutable([&](Entry& e) {
+                if (e.id == id) {
+                    result = &e;
+                    return false;
+                }
+                return true;
+            });
+
+            if (result)
+                return std::ref(*result);
+
+            return std::nullopt;
+        }
+
+
+    protected:
+        template <typename Func> 
+        void Traverse(Func&& func) const {
+            TraverseNode(m_root.get(), func);
+        }
+
+        template <typename Func>
+        bool TraverseNode(const Node* node, Func&& func) const {
+            if (!node)
+                return true; // continuar (nó nulo)
+
+            // Percorre entradas deste nó
+            for (const auto& e : node->items) {
+                if (!func(e))
+                    return false; // parar a travessia se retornar false
+            }
+
+            // Percorre filhos recursivamente
+            for (const auto& child : node->children) {
+                if (child && !TraverseNode(child.get(), func))
+                    return false; // parar se função retornar false
+            }
+
+            return true; // continua
+        }
+
+        template <typename Func>
+        void TraverseMutable(Func&& func) {
+            TraverseNodeMutable(m_root.get(), func);
+        }
+
+        private:
+        template <typename Func>
+        bool TraverseNodeMutable(Node* node, Func&& func) {
+            if (!node)
+                return true;
+
+            // Percorre as entradas mutáveis
+            for (auto& e : node->entries) {
+                if (!func(e))
+                    return false; // interrompe se retornar false
+            }
+
+            // Percorre filhos recursivamente
+            for (auto& child : node->children) {
+                if (child && !TraverseNodeMutable(child.get(), func))
+                    return false;
+            }
+
+            return true;
+        }
 
     private:
         std::unique_ptr<Node> m_root;

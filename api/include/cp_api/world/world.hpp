@@ -16,5 +16,6 @@ namespace cp_api {
         void Update(const double& delta);
         void FixedUpdate(const double& delta);
     private:
+        entt::registry m_registry;
     };
 } // namespace cp_api 

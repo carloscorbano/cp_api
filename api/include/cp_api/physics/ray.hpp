@@ -18,10 +18,12 @@ namespace cp_api::physics2D {
         cp_api::math::Vec2 GetPoint(float t) const { return origin + dir * t; }
     };
 
-    struct RayHit {
+    struct HitInfo {
         bool hit = false;
         float distance = 0.0f;
         float fraction = 0.0f;   // distance / maxDistance (opcional)
+        float penetration = 0.0f;
+        
         cp_api::math::Vec2 point;
         cp_api::math::Vec2 normal;
 
@@ -42,10 +44,11 @@ namespace cp_api::physics3D {
         cp_api::math::Vec3 GetPoint(float t) const { return origin + dir * t; }
     };
 
-    struct RayHit {
+    struct HitInfo {
         bool hit = false;
         float distance = 0.0f;
         float fraction = 0.0f;   // distance / maxDistance (opcional)
+        float penetration = 0.0f;
         cp_api::math::Vec3 point;
         cp_api::math::Vec3 normal;
 

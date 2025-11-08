@@ -5,8 +5,12 @@ namespace cp_api::physics2D {
         cp_api::math::Vec2 min, max;
 
         AABB() = default;
-        AABB(const cp_api::math::Vec2& mi, const cp_api::math::Vec2& ma)
-            : min(mi), max(ma) {}
+        AABB(const cp_api::math::Vec2& mi, const cp_api::math::Vec2& ma) {
+            min.x = std::min(mi.x, ma.x);
+            min.y = std::min(mi.y, ma.y);
+            max.x = std::max(mi.x, ma.x);
+            max.y = std::max(mi.y, ma.y);
+        }
 
         // --- Utilitários ---
         cp_api::math::Vec2 Center() const { return cp_api::math::Vec2((min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f); }
@@ -14,6 +18,8 @@ namespace cp_api::physics2D {
 
         cp_api::math::Vec2 Min() const { return min; }
         cp_api::math::Vec2 Max() const { return max; }
+
+        cp_api::math::Vec2 GetHalfSize() const { return (max - min) * 0.5f; }
 
         bool Contains(const AABB& other) const {
             return (other.min.x >= min.x && other.max.x <= max.x) &&
@@ -55,7 +61,7 @@ namespace cp_api::physics2D {
             return true;
         }
 
-        bool Intersects(const Ray& ray, RayHit& hit, float tMax) const {
+        bool Intersects(const Ray& ray, HitInfo& hit, float tMax) const {
             float tmin = 0.0f, tmax = tMax;
             int hitAxis = -1;
 
@@ -93,6 +99,7 @@ namespace cp_api::physics2D {
             hit.distance = tmin;
             hit.fraction = tmin / tMax;
             hit.point = ray.GetPoint(tmin);
+            hit.penetration = 0.0f;
 
             cp_api::math::Vec2 normal(0, 0);
             float eps = 1e-4f;
@@ -119,8 +126,14 @@ namespace cp_api::physics3D {
         void* userData = nullptr;    // ponteiro para o dono do AABB (ex: entidade, collider, etc.)
 
         AABB() = default;
-        AABB(const cp_api::math::Vec3& mi, const cp_api::math::Vec3& ma, void* data = nullptr)
-            : min(mi), max(ma), userData(data) {}
+        AABB(const cp_api::math::Vec3& mi, const cp_api::math::Vec3& ma, void* data = nullptr) {
+            min.x = std::min(mi.x, ma.x);
+            min.y = std::min(mi.y, ma.y);
+            min.z = std::min(mi.z, ma.z);
+            max.x = std::max(mi.x, ma.x);
+            max.y = std::max(mi.y, ma.y);
+            max.z = std::max(mi.z, ma.z);
+        }
 
         // -------------------------------
         // Utilitários básicos
@@ -136,6 +149,8 @@ namespace cp_api::physics3D {
 
         cp_api::math::Vec3 Min() const { return min; }
         cp_api::math::Vec3 Max() const { return max; }
+
+        cp_api::math::Vec3 GetHalfSize() const { return (max - min) * 0.5f; }
 
         bool Contains(const cp_api::math::Vec3& p) const {
             return (p.x >= min.x && p.x <= max.x &&
@@ -191,7 +206,7 @@ namespace cp_api::physics3D {
         // -------------------------------
         // Interseção com Ray
         // -------------------------------
-        bool Intersects(const Ray& ray, RayHit& hit, float tMax) const {
+        bool Intersects(const Ray& ray, HitInfo& hit, float tMax) const {
             float tmin = 0.0f, tmax = tMax;
             cp_api::math::Vec3 normal(0, 0, 0);
             int hitAxis = -1;
@@ -231,6 +246,7 @@ namespace cp_api::physics3D {
             hit.distance = tmin;
             hit.fraction = tmin / tMax;
             hit.point = ray.GetPoint(tmin);
+            hit.penetration = 0.0f;
 
             // --- Cálculo da normal geométrica ---
             float eps = 1e-4f;
