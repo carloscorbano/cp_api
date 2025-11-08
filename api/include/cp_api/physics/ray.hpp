@@ -27,8 +27,10 @@ namespace cp_api::physics2D {
         cp_api::math::Vec2 point;
         cp_api::math::Vec2 normal;
 
-        uint32_t hitID = 0;  // referência ao objeto atingido
+        uint32_t id = 0;  // referência ao objeto atingido
         uint32_t layer = 0;
+
+        void* userData = nullptr;
     };
 }
 
@@ -52,7 +54,9 @@ namespace cp_api::physics3D {
         cp_api::math::Vec3 point;
         cp_api::math::Vec3 normal;
 
-        uint32_t hitID = 0;  // referência ao objeto atingido
+        uint32_t id = 0;  // referência ao objeto atingido
         uint32_t layer = 0;        // camada de colisão (terrain, enemy, etc.)
+
+        void* userData = nullptr;
     };
 }

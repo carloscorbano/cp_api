@@ -26,6 +26,7 @@ namespace cp_api {
             uint32_t id;
             AABBT bounds;
             uint32_t layer{0};
+            void* userData;
         };
 
         struct Node
@@ -55,7 +56,7 @@ namespace cp_api {
          * @param id Unique object identifier.
          * @param bounds Object bounds.
          */
-        void Insert(uint32_t id,const AABBT& bounds, uint32_t layer = 0xFFFFFFFF);
+        void Insert(uint32_t id,const AABBT& bounds, void* userData, uint32_t layer = 0xFFFFFFFF);
 
         /**
          * @brief Remove an object by ID and bounds.
@@ -190,8 +191,8 @@ namespace cp_api {
 
     protected:
         template <typename Func> 
-        void Traverse(Func&& func) const {
-            TraverseNode(m_root.get(), func);
+        bool Traverse(Func&& func) const {
+            return TraverseNode(m_root.get(), func);
         }
 
         template <typename Func>
@@ -215,8 +216,8 @@ namespace cp_api {
         }
 
         template <typename Func>
-        void TraverseMutable(Func&& func) {
-            TraverseNodeMutable(m_root.get(), func);
+        bool TraverseMutable(Func&& func) {
+            return TraverseNodeMutable(m_root.get(), func);
         }
 
         private:
@@ -226,7 +227,7 @@ namespace cp_api {
                 return true;
 
             // Percorre as entradas mutáveis
-            for (auto& e : node->entries) {
+            for (auto& e : node->items) {
                 if (!func(e))
                     return false; // interrompe se retornar false
             }

@@ -53,6 +53,8 @@ find_package(glfw3 CONFIG REQUIRED)
 find_package(Stb REQUIRED)
 find_package(EnTT CONFIG REQUIRED)
 
+find_package(OpenGL REQUIRED)
+
 target_link_libraries(cp_api 
     PRIVATE
         MbedTLS::mbedtls
@@ -61,6 +63,7 @@ target_link_libraries(cp_api
         ZLIB::ZLIB
         EnTT::EnTT
         glfw
+        OpenGL::GL
     PUBLIC
         fmt::fmt
         glm::glm

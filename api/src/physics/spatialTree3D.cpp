@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <unordered_set>
+#include <cmath>
 #include "cp_api/core/math.hpp"
 
 void SpatialTree3D::QuerySphere(const cp_api::shapes3D::Sphere& sphere, std::vector<uint32_t>& outIds, uint32_t queryMask) const {
@@ -63,8 +64,9 @@ void SpatialTree3D::QuerySphere(const cp_api::shapes3D::Sphere& sphere, std::vec
         if (dist <= sphere.radius) {
             HitInfo hit{};
             hit.hit = true;
-            hit.hitID = entry.id;
+            hit.id = entry.id;
             hit.layer = entry.layer;
+            hit.userData = entry.userData; // ✅ copia o ponteiro
 
             hit.distance = dist;
             hit.fraction = (sphere.radius > 0.0f) ? (dist / sphere.radius) : 0.0f;
@@ -72,10 +74,16 @@ void SpatialTree3D::QuerySphere(const cp_api::shapes3D::Sphere& sphere, std::vec
 
             if (dist > 1e-6f)
                 hit.normal = glm::normalize(diff);
-            else
-                hit.normal = Vec3(0.0f, 1.0f, 0.0f); // fallback
+            else {
+                // fallback: tenta uma direção coerente apontando para o centro do AABB
+                Vec3 toBox = ( (box.min + box.max) * 0.5f ) - sphere.center;
+                if (glm::length(toBox) > 1e-6f)
+                    hit.normal = glm::normalize(toBox);
+                else
+                    hit.normal = Vec3(0.0f, 1.0f, 0.0f);
+            }
 
-            // ponto de contato (ponto mais próximo no AABB)
+            // ponto de contato: ponto mais próximo no AABB
             hit.point = closest;
 
             outInfos.push_back(hit);
@@ -134,7 +142,6 @@ void SpatialTree3D::QueryCapsule(const cp_api::shapes3D::Capsule& capsule, std::
 
         // posicionamento do segmento em relação ao box
         Vec3 segCenter = (p0 + p1) * 0.5f;
-        Vec3 halfSeg = (p1 - p0) * 0.5f;
         Vec3 d = segCenter - boxCenter;
 
         // clamp d dentro dos extents (acha ponto do box mais próximo do centro do segmento)
@@ -162,8 +169,9 @@ void SpatialTree3D::QueryCapsule(const cp_api::shapes3D::Capsule& capsule, std::
         if (dist <= capsule.radius) {
             HitInfo hit{};
             hit.hit = true;
-            hit.hitID = entry.id;
+            hit.id = entry.id;
             hit.layer = entry.layer;
+            hit.userData = entry.userData; // ✅ copia userData
 
             hit.distance = dist;
             hit.fraction = (capsule.radius > 0.0f) ? (dist / capsule.radius) : 0.0f;
@@ -171,8 +179,14 @@ void SpatialTree3D::QueryCapsule(const cp_api::shapes3D::Capsule& capsule, std::
 
             if (dist > 1e-6f)
                 hit.normal = glm::normalize(diff);
-            else
-                hit.normal = Vec3(0.0f, 1.0f, 0.0f);
+            else {
+                // fallback: direção do centro do box ao centro do segmento
+                Vec3 toBox = boxCenter - segCenter;
+                if (glm::length(toBox) > 1e-6f)
+                    hit.normal = glm::normalize(toBox);
+                else
+                    hit.normal = Vec3(0.0f, 1.0f, 0.0f);
+            }
 
             // ponto de contato no box (mais próximo)
             hit.point = closestPointBox;
@@ -183,6 +197,9 @@ void SpatialTree3D::QueryCapsule(const cp_api::shapes3D::Capsule& capsule, std::
 }
 
 void SpatialTree3D::QueryCube(const cp_api::physics3D::AABB& range, std::vector<cp_api::physics3D::HitInfo>& outInfos, uint32_t queryMask) const {
+    using namespace cp_api::math;
+    using namespace cp_api::physics3D;
+
     outInfos.clear();
 
     std::vector<uint32_t> ids;
@@ -197,19 +214,46 @@ void SpatialTree3D::QueryCube(const cp_api::physics3D::AABB& range, std::vector<
         if (!e.bounds.Intersects(range))
             continue;
 
-        cp_api::physics3D::HitInfo hit;
+        HitInfo hit;
         hit.hit = true;
-        hit.hitID = e.id;
+        hit.id = e.id;
         hit.layer = e.layer;
+        hit.userData = e.userData; // ✅ copia userData
 
-        cp_api::math::Vec3 boxCenter = (e.bounds.min + e.bounds.max) * 0.5f;
-        cp_api::math::Vec3 queryCenter = (range.min + range.max) * 0.5f;
-        cp_api::math::Vec3 diff = boxCenter - queryCenter;
+        Vec3 aCenter = (range.min + range.max) * 0.5f;
+        Vec3 bCenter = (e.bounds.min + e.bounds.max) * 0.5f;
+        Vec3 diff = bCenter - aCenter;
+        Vec3 aHalf = range.GetHalfSize();
+        Vec3 bHalf = e.bounds.GetHalfSize();
+
+        // overlap por eixo
+        Vec3 overlap = (aHalf + bHalf) - glm::abs(diff);
+
+        // proteção: se overlap negativo (não deveria acontecer por Intersects) zera
+        overlap.x = std::max(overlap.x, 0.0f);
+        overlap.y = std::max(overlap.y, 0.0f);
+        overlap.z = std::max(overlap.z, 0.0f);
+
+        // escolhe eixo de menor penetração para definir normal
+        float minOverlap = std::min({ overlap.x, overlap.y, overlap.z });
+
+        if (minOverlap == overlap.x) {
+            hit.normal = Vec3((diff.x < 0.0f) ? -1.0f : 1.0f, 0.0f, 0.0f);
+            hit.penetration = overlap.x;
+        } else if (minOverlap == overlap.y) {
+            hit.normal = Vec3(0.0f, (diff.y < 0.0f) ? -1.0f : 1.0f, 0.0f);
+            hit.penetration = overlap.y;
+        } else {
+            hit.normal = Vec3(0.0f, 0.0f, (diff.z < 0.0f) ? -1.0f : 1.0f);
+            hit.penetration = overlap.z;
+        }
+
+        // ponto aproximado de contato: centro do bloco deslocado pela metade da penetração
+        hit.point = bCenter - hit.normal * (hit.penetration * 0.5f);
 
         hit.distance = glm::length(diff);
-        hit.normal = (hit.distance > 1e-6f) ? glm::normalize(diff) : cp_api::math::Vec3(0,1,0);
-        hit.penetration = (e.bounds.GetHalfSize().x + range.GetHalfSize().x) - fabs(diff.x);
-        hit.point = boxCenter - hit.normal * 0.5f;
+        hit.fraction = 0.0f;
+
         outInfos.push_back(hit);
     }
 }
@@ -219,8 +263,8 @@ void SpatialTree3D::QueryRay(const cp_api::physics3D::Ray& ray, std::vector<cp_a
 
     std::vector<uint32_t> ids;
     cp_api::physics3D::AABB rayBox(
-        ray.origin - cp_api::math::Vec3(maxDist),
-        ray.origin + cp_api::math::Vec3(maxDist)
+        ray.origin - cp_api::math::Vec3(maxDist, maxDist, maxDist),
+        ray.origin + cp_api::math::Vec3(maxDist, maxDist, maxDist)
     );
     this->QueryRange(rayBox, ids, queryMask);
 
@@ -233,9 +277,32 @@ void SpatialTree3D::QueryRay(const cp_api::physics3D::Ray& ray, std::vector<cp_a
         cp_api::physics3D::HitInfo hit;
         if (e.bounds.Intersects(ray, hit, maxDist))
         {
-            hit.hitID = e.id;
+            hit.id = e.id;
             hit.layer = e.layer;
+            hit.userData = e.userData;
             outInfos.push_back(hit);
         }
     }
+}
+
+void SpatialTree3D::QueryFrustum(const cp_api::shapes3D::Frustum& frustum, std::vector<uint32_t>& outIds, uint32_t queryMask) const {
+    this->Traverse([&](const auto& entry) {
+        if ((entry.layer & queryMask) == 0) return true;
+        if (frustum.Intersects(entry.bounds))
+            outIds.push_back(entry.id);
+        return true;
+    });
+}
+
+void SpatialTree3D::QueryFrustum(const cp_api::shapes3D::Frustum& frustum, std::vector<cp_api::physics3D::HitInfo>& outInfos, uint32_t queryMask) const {
+    this->Traverse([&](const auto& entry) {
+        if ((entry.layer & queryMask) == 0) return true;
+        if (frustum.Intersects(entry.bounds)) {
+            cp_api::physics3D::HitInfo hit{};
+            hit.id = entry.id;
+            hit.userData = entry.userData;
+            outInfos.push_back(hit);
+        }
+        return true;
+    });
 }

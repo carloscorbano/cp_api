@@ -27,9 +27,9 @@ cp_api::SpatialTree<VecT,AABBT,RayT,RayHitT,ChildCount>::~SpatialTree() noexcept
 // Public API
 // =============================
 template<typename VecT, typename AABBT, typename RayT, typename RayHitT, int ChildCount>
-void cp_api::SpatialTree<VecT,AABBT,RayT,RayHitT,ChildCount>::Insert(uint32_t id,const AABBT& bounds, uint32_t layer)
+void cp_api::SpatialTree<VecT,AABBT,RayT,RayHitT,ChildCount>::Insert(uint32_t id,const AABBT& bounds, void* userData, uint32_t layer)
 {
-    insert(*m_root, {id, bounds, layer});
+    insert(*m_root, {id, bounds, layer, userData});
     ++m_count;
 }
 
@@ -46,8 +46,14 @@ bool cp_api::SpatialTree<VecT,AABBT,RayT,RayHitT,ChildCount>::Remove(uint32_t id
 template<typename VecT, typename AABBT, typename RayT, typename RayHitT, int ChildCount>
 bool cp_api::SpatialTree<VecT,AABBT,RayT,RayHitT,ChildCount>::Update(uint32_t id,const AABBT& oldBounds,const AABBT& newBounds)
 {
+    auto entryOpt = FindEntry(id);
+    if (!entryOpt.has_value())
+        return false;
+
+    const auto& entry = entryOpt.value().get();
+
     if (Remove(id, oldBounds)) {
-        Insert(id, newBounds);
+        Insert(id, newBounds, entry.userData, entry.layer);
         return true;
     }
     return false;
@@ -59,8 +65,9 @@ size_t cp_api::SpatialTree<VecT,AABBT,RayT,RayHitT,ChildCount>::UpdateMany(
     const std::vector<uint32_t>& ids)
 {
     size_t updated = 0;
-    for (size_t i = 0; i < ids.size(); ++i)
-        if(Update(ids[i], oldNewBounds[i].first, oldNewBounds[i].second))
+    size_t count = std::min(ids.size(), oldNewBounds.size());
+    for (size_t i = 0; i < count; ++i)
+        if (Update(ids[i], oldNewBounds[i].first, oldNewBounds[i].second))
             ++updated;
     return updated;
 }
@@ -416,6 +423,7 @@ void cp_api::SpatialTree<VecT,AABBT,RayT,RayHitT,ChildCount>::raycastNode(
         if(e.bounds.Intersects(ray, hit, tMax)) {
             hit.layer = e.layer;
             hit.hitID = e.id;
+            hit.userData = e.userData;
             out.push_back(std::move(hit)); 
         }
     }
@@ -439,6 +447,7 @@ bool cp_api::SpatialTree<VecT,AABBT,RayT,RayHitT,ChildCount>::raycastClosestNode
         if(e.bounds.Intersects(ray, hit, bestT) && hit.t < bestT)
         {
             bestT = hit.t;
+            hit.userData = e.userData;
             out = std::move(hit);
             hitSomething = true;
         }

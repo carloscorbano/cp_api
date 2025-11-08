@@ -112,7 +112,7 @@ namespace cp_api::physics2D {
             hit.normal = glm::normalize(normal);
 
             // Preenche layer e collision info no hit
-            hit.hitID = 0;
+            hit.id = 0;
 
             return true;
         }
@@ -261,7 +261,7 @@ namespace cp_api::physics3D {
 
             // Se atingir canto ou aresta, a normal fica diagonal — normalize.
             hit.normal = math::Normalize(normal);
-            hit.hitID = 0;
+            hit.id = 0;
 
             return true;
         }
