@@ -3,7 +3,6 @@
 #include <cp_api/core/serializable.hpp>
 
 int main() {
-
     using namespace cp_api;
     try {
         cp_api::Framework framework;

@@ -44,6 +44,7 @@ namespace cp_api {
         s_windows.push_back(this);
 
         m_input = std::make_unique<InputManager>(m_wndHandle);
+        m_vulkan = std::make_unique<Vulkan>(m_wndHandle);
     }
 
     Window::~Window() {

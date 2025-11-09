@@ -1,7 +1,6 @@
 #pragma once
 
 #include "cp_api/containers/spatialTree.hpp"
-#include "ray.hpp"
 #include "aabb.hpp"
 #include "cp_api/shapes/sphere.hpp"
 #include "cp_api/shapes/capsule.hpp"

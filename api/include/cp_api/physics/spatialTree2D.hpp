@@ -1,11 +1,10 @@
 #pragma once
 
 #include "cp_api/containers/spatialTree.hpp"
-#include "ray.hpp"
-#include "aabb.hpp"
 #include "cp_api/shapes/circle.hpp"
 #include "cp_api/shapes/capsule.hpp"
 #include "cp_api/shapes/frustum.hpp"
+#include "aabb.hpp"
 
 class SpatialTree2D : public cp_api::SpatialTree<cp_api::math::Vec2, cp_api::physics2D::AABB, cp_api::physics2D::Ray, cp_api::physics2D::HitInfo, 4> {
 public:

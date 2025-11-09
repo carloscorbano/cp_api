@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cp_api/core/math.hpp"
+#include "cp_api/physics/aabb.hpp"
 
 namespace cp_api::shapes2D {
     struct Capsule {

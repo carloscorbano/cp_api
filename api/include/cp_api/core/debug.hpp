@@ -54,6 +54,13 @@ namespace cp_api {
             Print(level, msg);
         }
 
+        template<typename... Args>
+        static void Throw(fmt::format_string<Args...> format, Args&&... args) {
+            const std::string msg = fmt::format(format, std::forward<Args>(args)...);
+            Print(LogLevel::Error, msg);
+            throw std::runtime_error(msg);
+        }
+
         /// Função interna para exibir mensagem com formatação final.
         static void Print(LogLevel level, const std::string& message);
         
@@ -78,3 +85,4 @@ namespace cp_api {
 #define CP_LOG_WARN(fmt_str, ...)    ::cp_api::Debug::Log(::cp_api::LogLevel::Warn, fmt_str, ##__VA_ARGS__)
 #define CP_LOG_ERROR(fmt_str, ...)   ::cp_api::Debug::Log(::cp_api::LogLevel::Error, fmt_str, ##__VA_ARGS__)
 #define CP_LOG_DEBUG(fmt_str, ...)   ::cp_api::Debug::Log(::cp_api::LogLevel::Debug, fmt_str, ##__VA_ARGS__)
+#define CP_LOG_THROW(fmt_str, ...)   ::cp_api::Debug::Throw(fmt_str, ##__VA_ARGS__)

@@ -4,7 +4,7 @@
 
 namespace cp_api::shapes {
     struct Triangle {
-        math::Vec3 v0, v1, v2;
-        math::Vec3 normal;
+        cp_api::math::Vec3 v0, v1, v2;
+        cp_api::math::Vec3 normal;
     };
 } // namespace cp_api

@@ -19,8 +19,10 @@ add_library(cp_api STATIC
 
     src/window/glfw.inc.cpp
     src/window/window.cpp
-    src/window/renderer.cpp
+    src/window/renderer2D.cpp
+    src/window/renderer3D.cpp
     src/window/inputManager.cpp
+    src/window/vulkan.cpp
     
     src/containers/ntree.cpp
     src/containers/spatialTree.cpp
@@ -53,7 +55,7 @@ find_package(glfw3 CONFIG REQUIRED)
 find_package(Stb REQUIRED)
 find_package(EnTT CONFIG REQUIRED)
 
-find_package(OpenGL REQUIRED)
+# find_package(OpenGL REQUIRED) #for test usage only
 
 target_link_libraries(cp_api 
     PRIVATE
@@ -63,7 +65,7 @@ target_link_libraries(cp_api
         ZLIB::ZLIB
         EnTT::EnTT
         glfw
-        OpenGL::GL
+        # OpenGL::GL
     PUBLIC
         fmt::fmt
         glm::glm

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ray.hpp"
+
 namespace cp_api::physics2D {
         struct AABB {
         cp_api::math::Vec2 min, max;
