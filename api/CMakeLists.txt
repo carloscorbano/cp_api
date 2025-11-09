@@ -19,10 +19,12 @@ add_library(cp_api STATIC
 
     src/window/glfw.inc.cpp
     src/window/window.cpp
-    src/window/renderer2D.cpp
-    src/window/renderer3D.cpp
     src/window/inputManager.cpp
     src/window/vulkan.cpp
+    src/window/vma.inc.cpp
+    src/window/vkBuffer.cpp
+    src/window/vkImage.cpp
+    src/window/vkTexture.cpp
     
     src/containers/ntree.cpp
     src/containers/spatialTree.cpp

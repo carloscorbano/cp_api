@@ -2,6 +2,8 @@
 #include "cp_api/core/debug.hpp"
 #include <algorithm>
 #include <iostream>
+#include "cp_api/world/world.hpp"
+#include <chrono>
 
 namespace cp_api {
 
@@ -45,9 +47,24 @@ namespace cp_api {
 
         m_input = std::make_unique<InputManager>(m_wndHandle);
         m_vulkan = std::make_unique<Vulkan>(m_wndHandle);
+
+
+        GetEventDispatcher().Subscribe<onWindowMinimizeEvent>([this](const onWindowMinimizeEvent& e) {
+            CP_LOG_INFO("Window minimized: {}", e.minimized);
+            m_renderEnabled = !e.minimized;
+        });
+
+        GetEventDispatcher().Subscribe<onWindowResizeEvent>([this](const onWindowResizeEvent& e) {
+            m_lastDragTime = std::chrono::steady_clock::now();
+            m_isDragging.store(true);
+            CP_LOG_INFO("Window resize event received. Dragging: {}", m_isDragging.load() ? "true" : "false");
+        });
+
+        m_renderThread = std::thread(&Window::renderWorker, this);
     }
 
     Window::~Window() {
+        m_renderThread.join();
         s_windows.erase(std::remove(s_windows.begin(), s_windows.end(), this), s_windows.end());
         if (m_wndHandle)
             glfwDestroyWindow(m_wndHandle);
@@ -56,14 +73,8 @@ namespace cp_api {
             glfwTerminate();
     }
 
-    // ----------------- Poll / State -----------------
-    void Window::Update() const { 
-        glfwPollEvents(); 
-        m_input->update();
-    }
-
+    // ----------------- Getters ----------------
     bool Window::ShouldClose() const { return glfwWindowShouldClose(m_wndHandle); }
-
     int Window::GetWidth() const { int w, h; glfwGetWindowSize(m_wndHandle, &w, &h); return w; }
     int Window::GetHeight() const { int w, h; glfwGetWindowSize(m_wndHandle, &w, &h); return h; }
     float Window::GetAspectRatio() const { int w = GetWidth(), h = GetHeight(); return h != 0 ? float(w)/h : 1.f; }
@@ -86,6 +97,34 @@ namespace cp_api {
     // ----------------- DPI -----------------
     void Window::GetContentScale(float& x, float& y) const {
         glfwGetWindowContentScale(m_wndHandle, &x, &y);
+    }
+
+    // ----------------- POOL AND UPDATES -----------------
+    void Window::Update() { 
+        glfwPollEvents(); 
+        m_input->update();
+
+        if(m_isDragging.load()) {
+            auto now = std::chrono::steady_clock::now();
+            auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_lastDragTime).count();
+            if (duration > 200) { // 200 ms after last resize event
+                m_isDragging.store(false);
+                CP_LOG_INFO("Window resize drag ended. {}", m_isDragging.load() ? "Still dragging." : "Not dragging.");
+                m_swapchainIsDirty.store(true);
+                m_vulkan->RecreateSwapchain(true);
+            }
+        }
+    }
+
+    void Window::ProcessWorld(World& world) {
+        // Placeholder for future window-world interaction logic
+    }
+
+    void Window::renderWorker() {
+        while(!ShouldClose()) {
+            // Placeholder for rendering logic
+            std::this_thread::sleep_for(std::chrono::milliseconds(16)); // Simulate ~60 FPS
+        }
     }
 
     // ----------------- Window Mode -----------------
@@ -119,7 +158,8 @@ namespace cp_api {
         }
 
         m_mode = mode;
-        if (m_callbacks.onModeChanged) m_callbacks.onModeChanged(m_wndHandle, m_mode);
+
+        m_eventDispatcher.Emit<onWindowModeChangedEvent>({ m_wndHandle, m_mode });
     }
 
     void Window::ToggleFullscreen() {
@@ -129,47 +169,35 @@ namespace cp_api {
             SetWindowMode(WindowMode::Fullscreen);
     }
 
-    // // ----------------- Global hotkeys (F10/F11/F12) -----------------
-    // void Window::PollGlobalHotkeys() {
-    //     for (auto* win : s_windows) {
-    //         if (glfwGetKey(win->m_wndHandle, GLFW_KEY_F10) == GLFW_PRESS)
-    //             win->SetWindowMode(WindowMode::Borderless);
-    //         if (glfwGetKey(win->m_wndHandle, GLFW_KEY_F11) == GLFW_PRESS)
-    //             win->SetWindowMode(WindowMode::Fullscreen);
-    //         if (glfwGetKey(win->m_wndHandle, GLFW_KEY_F12) == GLFW_PRESS)
-    //             win->SetWindowMode(WindowMode::Windowed);
-    //     }
-    // }
-
     // ----------------- Callbacks -----------------
     void Window::GLFW_WindowSizeCallback(GLFWwindow* window, int width, int height) {
         if (auto self = static_cast<Window*>(glfwGetWindowUserPointer(window))) {
-            if (self->m_callbacks.onResize) self->m_callbacks.onResize(window, width, height);
+            self->m_eventDispatcher.Emit<onWindowResizeEvent>(onWindowResizeEvent{window, width, height});
         }
     }
     void Window::GLFW_WindowPosCallback(GLFWwindow* window, int xpos, int ypos) {
         if (auto self = static_cast<Window*>(glfwGetWindowUserPointer(window))) {
-            if (self->m_callbacks.onMove) self->m_callbacks.onMove(window, xpos, ypos);
+            self->m_eventDispatcher.Emit<onWindowMoveEvent>(onWindowMoveEvent{window, xpos, ypos});
         }
     }
     void Window::GLFW_WindowFocusCallback(GLFWwindow* window, int focused) {
         if (auto self = static_cast<Window*>(glfwGetWindowUserPointer(window))) {
-            if (self->m_callbacks.onFocus) self->m_callbacks.onFocus(window, focused == GLFW_TRUE);
+            self->m_eventDispatcher.Emit<onWindowFocusEvent>(onWindowFocusEvent{window, focused == GLFW_TRUE});
         }
     }
     void Window::GLFW_WindowIconifyCallback(GLFWwindow* window, int iconified) {
         if (auto self = static_cast<Window*>(glfwGetWindowUserPointer(window))) {
-            if (self->m_callbacks.onMinimize) self->m_callbacks.onMinimize(window, iconified == GLFW_TRUE);
+            self->m_eventDispatcher.Emit<onWindowMinimizeEvent>(onWindowMinimizeEvent{window, iconified == GLFW_TRUE});
         }
     }
     void Window::GLFW_WindowMaximizeCallback(GLFWwindow* window, int maximized) {
         if (auto self = static_cast<Window*>(glfwGetWindowUserPointer(window))) {
-            if (self->m_callbacks.onMaximize) self->m_callbacks.onMaximize(window, maximized == GLFW_TRUE);
+            self->m_eventDispatcher.Emit<onWindowRestoreEvent>(onWindowRestoreEvent{window});
         }
     }
     void Window::GLFW_WindowCloseCallback(GLFWwindow* window) {
         if (auto self = static_cast<Window*>(glfwGetWindowUserPointer(window))) {
-            if (self->m_callbacks.onClose) self->m_callbacks.onClose(window);
+            self->m_eventDispatcher.Emit<onWindowCloseEvent>(onWindowCloseEvent{window});
         }
     }
 

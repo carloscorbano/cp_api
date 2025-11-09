@@ -17,6 +17,8 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
     void* pUserData);
 
 namespace cp_api {
+    enum class QueueType { GRAPHICS, PRESENT, COMPUTE, TRANSFER };
+
     class Vulkan {
     public:
        struct QueueFamilyIndices {
@@ -25,17 +27,28 @@ namespace cp_api {
             std::optional<uint32_t> computeFamily;
             std::optional<uint32_t> transferFamily;
 
-            bool isComplete() { return graphicsFamily.has_value() && presentFamily.has_value(); }
+            bool isComplete() { return graphicsFamily.has_value() && presentFamily.has_value() && computeFamily.has_value() && transferFamily.has_value(); }
         };
 
-        struct FamiliesQueue {
-            VkQueue graphics, present, compute, transfer;
+        struct DeviceQueues {
+            VkQueue graphics = VK_NULL_HANDLE;
+            VkQueue present = VK_NULL_HANDLE;
+            VkQueue compute = VK_NULL_HANDLE;
+            VkQueue transfer = VK_NULL_HANDLE;
         };
 
         struct SwapChainSupportDetails {
             VkSurfaceCapabilities2KHR capabilities;
             std::vector<VkSurfaceFormat2KHR> formats;
             std::vector<VkPresentModeKHR> presentModes;
+        };
+
+        struct Swapchain {
+            VkSwapchainKHR              handler = VK_NULL_HANDLE;
+            std::vector<VkImage>        images;
+            std::vector<VkImageView>    views;
+            VkFormat                    format;
+            VkExtent2D                  extent;
         };
 
         Vulkan(GLFWwindow* window);
@@ -49,6 +62,10 @@ namespace cp_api {
         VkInstance& GetInstance() { return m_instance; }
         VkDevice& GetDevice() { return m_device; }
         VkPhysicalDevice& GetPhysicalDevice() { return m_physDevice; }
+
+        VkQueue GetQueue(QueueType type) const;
+
+        void RecreateSwapchain(bool useOldSwapchain = false);
 
     private:
         void createInstance();
@@ -65,6 +82,9 @@ namespace cp_api {
         void createLogicalDevice();
         void destroyLogicalDevice();
 
+        Swapchain createSwapchain(Swapchain* oldSwapchain = nullptr);
+        void destroySwapchain(Swapchain* swapchain);
+
         std::vector<const char*> getGlfwRequiredExtensions();
         bool checkValidationLayerSupport();
         bool checkDeviceExtensionSupport(VkPhysicalDevice device);
@@ -72,6 +92,9 @@ namespace cp_api {
         bool isDeviceSuitable(VkPhysicalDevice device);
         QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKHR surface);
         SwapChainSupportDetails querySwapChainSupport(VkPhysicalDevice device, VkSurfaceKHR surface);
+        VkSurfaceFormat2KHR chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormat2KHR>& availableFormats);
+        VkPresentModeKHR chooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes);
+        VkExtent2D chooseSwapExtent(const VkSurfaceCapabilities2KHR& capabilities);
 
         void logDeviceFeatures(
             const VkPhysicalDeviceFeatures2& supported,
@@ -90,11 +113,14 @@ namespace cp_api {
         VkInstance                  m_instance = VK_NULL_HANDLE;
         VkDevice                    m_device = VK_NULL_HANDLE;
         QueueFamilyIndices          m_familyIndices;
-        FamiliesQueue               m_familyQueues;
+        DeviceQueues                m_deviceQueues;
         VkPhysicalDevice            m_physDevice = VK_NULL_HANDLE;
 
         std::vector<const char*>    m_validationLayers = { "VK_LAYER_KHRONOS_validation" };
+        std::vector<const char*>    m_requiredExtensions = { VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME };
         std::vector<const char*>    m_deviceExtensions = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
         VkDebugUtilsMessengerEXT    m_debugMessenger = VK_NULL_HANDLE;
+
+        Swapchain                   m_swapchain;
     };
 } // namespace cp_api

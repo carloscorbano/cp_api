@@ -2,6 +2,7 @@
 #include "cp_api/core/debug.hpp"
 #include "cp_api/window/window.hpp"
 #include "cp_api/world/world.hpp"
+#include "cp_api/core/threadPool.hpp"
 
 namespace cp_api {
     Framework::Framework() {
@@ -14,6 +15,7 @@ namespace cp_api {
 
     void Framework::Init() {
         m_window = std::make_unique<Window>(800, 600, "CP_API Window");
+        m_threadPool = std::make_unique<ThreadPool>();
         m_diagnostics = std::make_unique<DiagnosticsManager>();
         m_world = std::make_unique<World>();
 
@@ -79,7 +81,11 @@ namespace cp_api {
                     m_world->Update(dt);
                 }
                 m_diagnostics->StopTimer("WorldUpdate");
-                
+
+                m_diagnostics->StartTimer("WindowWorldProcess");
+                {
+                    m_window->ProcessWorld(*m_world);
+                }
             }
             m_diagnostics->StopTimer("Frame");
 

@@ -3,12 +3,16 @@
 #include "glfw.inc.hpp"
 #include "inputManager.hpp"
 #include "vulkan.hpp"
-
+#include "vkImage.hpp"
+#include "cp_api/core/events.hpp"
 #include <functional>
 #include <string>
 #include <stdexcept>
 #include <vector>
 #include <memory>
+#include <thread>
+#include <atomic>
+#include <chrono>
 
 namespace cp_api {
 
@@ -18,16 +22,49 @@ namespace cp_api {
         Fullscreen
     };
 
-    struct WindowCallbacks {
-        std::function<void(GLFWwindow*, int, int)> onResize;
-        std::function<void(GLFWwindow*, int, int)> onMove;
-        std::function<void(GLFWwindow*, bool)> onFocus;
-        std::function<void(GLFWwindow*, bool)> onMinimize;
-        std::function<void(GLFWwindow*, bool)> onMaximize;
-        std::function<void(GLFWwindow*, WindowMode)> onModeChanged;
-        std::function<void(GLFWwindow*)> onClose;
+    struct onWindowModeChangedEvent : public Event {
+        GLFWwindow* window;
+        WindowMode mode;
+        onWindowModeChangedEvent(GLFWwindow* wnd, WindowMode m) : window(wnd), mode(m) {}
     };
 
+    struct onWindowResizeEvent : public Event {
+        GLFWwindow* window;
+        int width;
+        int height;
+        onWindowResizeEvent(GLFWwindow* wnd, int w, int h) : window(wnd), width(w), height(h) {}
+    };
+
+    struct onWindowMoveEvent : public Event {
+        GLFWwindow* window;
+        int xpos;
+        int ypos;
+        onWindowMoveEvent(GLFWwindow* wnd, int x, int y) : window(wnd), xpos(x), ypos(y) {}
+    };
+
+    struct onWindowFocusEvent : public Event {
+        GLFWwindow* window;
+        bool focused;
+        onWindowFocusEvent(GLFWwindow* wnd, bool f) : window(wnd), focused(f) {}
+    };
+
+    struct onWindowMinimizeEvent : public Event {
+        GLFWwindow* window;
+        bool minimized;
+        onWindowMinimizeEvent(GLFWwindow* wnd, bool m) : window(wnd), minimized(m) {}
+    };
+
+    struct onWindowRestoreEvent : public Event {
+        GLFWwindow* window;
+        onWindowRestoreEvent(GLFWwindow* wnd) : window(wnd) {}
+    };
+
+    struct onWindowCloseEvent : public Event {
+        GLFWwindow* window;
+        onWindowCloseEvent(GLFWwindow* wnd) : window(wnd) {}
+    };
+
+    class World;
     class Window {
     public:
         Window(int width, int height, const char* title);
@@ -38,14 +75,15 @@ namespace cp_api {
         Window& operator=(const Window&) = delete;
         Window& operator=(Window&&) = delete;
 
-        // Main loop
-        void Update() const;
-        bool ShouldClose() const;
-
         // Window mode
         void SetWindowMode(WindowMode mode);
         void ToggleFullscreen();
         WindowMode GetWindowMode() const { return m_mode; }
+
+        bool ShouldClose() const;
+        void Update();
+
+        void ProcessWorld(World& world);
 
         // Window state
         int GetWidth() const;
@@ -67,17 +105,15 @@ namespace cp_api {
         // DPI
         void GetContentScale(float& x, float& y) const;
 
-        // Callbacks
-        void SetCallbacks(const WindowCallbacks& callbacks) { m_callbacks = callbacks; }
-
         GLFWwindow* GetHandle() const { return m_wndHandle; }
-
-        // // Static: handle toggles de fullscreen via tecla
-        // static void PollGlobalHotkeys();
 
         InputManager& GetInput() { return *m_input; }
         Vulkan& GetVulkan() { return *m_vulkan; }
 
+        EventDispatcher& GetEventDispatcher() { return m_eventDispatcher; }
+
+    private:
+        void renderWorker();
     private:
         static void GLFW_WindowSizeCallback(GLFWwindow* window, int width, int height);
         static void GLFW_WindowPosCallback(GLFWwindow* window, int xpos, int ypos);
@@ -92,7 +128,7 @@ namespace cp_api {
     private:
         GLFWwindow* m_wndHandle = nullptr;
         WindowMode m_mode = WindowMode::Windowed;
-        WindowCallbacks m_callbacks;
+        EventDispatcher m_eventDispatcher;
 
         int m_prevX = 0, m_prevY = 0;
         int m_prevW = 0, m_prevH = 0;
@@ -102,6 +138,38 @@ namespace cp_api {
 
         std::unique_ptr<InputManager> m_input;
         std::unique_ptr<Vulkan> m_vulkan;
+
+        std::thread m_renderThread;
+
+        struct FrameCtx
+        {
+            std::vector<VkCommandPool> cmdPool;
+            std::vector<VkCommandBuffer> secondaries;
+            VkCommandBuffer primary = VK_NULL_HANDLE;
+
+            VkSemaphore imageAvailable = VK_NULL_HANDLE;
+
+            uint64_t recordValue = 0;
+            uint64_t renderValue = 0;
+
+            VulkanImage renderTarget;
+            VulkanImage depthStencilTarget;
+        };
+
+        std::atomic<bool> m_renderEnabled { true };
+        std::atomic<bool> m_swapchainIsDirty { false };
+        std::atomic<bool> m_skipAfterSwapchainRecreation { false };
+
+        std::vector<FrameCtx> m_frames;
+        VkSemaphore timelineSem = VK_NULL_HANDLE;  
+
+        uint32_t m_writeFrameIndex = 0;
+        uint32_t m_readFrameIndex = 0;
+
+        VkCommandPool m_transferCmdPool = VK_NULL_HANDLE;
+
+        std::chrono::steady_clock::time_point m_lastDragTime;
+        std::atomic<bool> m_isDragging { false };
     };
 
 } // namespace cp_api
