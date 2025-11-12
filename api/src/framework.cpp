@@ -84,7 +84,7 @@ namespace cp_api {
 
                 m_diagnostics->StartTimer("WindowWorldProcess");
                 {
-                    m_window->ProcessWorld(*m_world);
+                    m_window->ProcessWorld(*m_world, *m_threadPool);
                 }
             }
             m_diagnostics->StopTimer("Frame");

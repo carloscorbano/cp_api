@@ -3,7 +3,8 @@
 #include "glfw.inc.hpp"
 #include "inputManager.hpp"
 #include "vulkan.hpp"
-#include "vkImage.hpp"
+#include "frame.hpp"
+#include "imgui.inc.hpp"
 #include "cp_api/core/events.hpp"
 #include <functional>
 #include <string>
@@ -65,7 +66,9 @@ namespace cp_api {
     };
 
     class World;
+    class ThreadPool;
     class Window {
+        const uint32_t SIMULTANEOS_WORKERS_RECORDING_COUNT = 2;
     public:
         Window(int width, int height, const char* title);
         ~Window();
@@ -83,7 +86,7 @@ namespace cp_api {
         bool ShouldClose() const;
         void Update();
 
-        void ProcessWorld(World& world);
+        void ProcessWorld(World& world, ThreadPool& threadPool);
 
         // Window state
         int GetWidth() const;
@@ -141,35 +144,42 @@ namespace cp_api {
 
         std::thread m_renderThread;
 
-        struct FrameCtx
-        {
-            std::vector<VkCommandPool> cmdPool;
-            std::vector<VkCommandBuffer> secondaries;
-            VkCommandBuffer primary = VK_NULL_HANDLE;
-
-            VkSemaphore imageAvailable = VK_NULL_HANDLE;
-
-            uint64_t recordValue = 0;
-            uint64_t renderValue = 0;
-
-            VulkanImage renderTarget;
-            VulkanImage depthStencilTarget;
-        };
-
         std::atomic<bool> m_renderEnabled { true };
         std::atomic<bool> m_swapchainIsDirty { false };
         std::atomic<bool> m_skipAfterSwapchainRecreation { false };
+        std::atomic<bool> m_iconified { false };
 
-        std::vector<FrameCtx> m_frames;
-        VkSemaphore timelineSem = VK_NULL_HANDLE;  
+        std::vector<Frame> m_frames;
+        VkSemaphore m_timelineSem = VK_NULL_HANDLE;  
 
         uint32_t m_writeFrameIndex = 0;
         uint32_t m_readFrameIndex = 0;
 
         VkCommandPool m_transferCmdPool = VK_NULL_HANDLE;
+        VkCommandBuffer m_transferCmdBuffer = VK_NULL_HANDLE;
 
         std::chrono::steady_clock::time_point m_lastDragTime;
         std::atomic<bool> m_isDragging { false };
+
+        bool m_vsyncEnabled = true;
+
+        VkDescriptorPool m_imguiPool;
+
+    private:
+        void createFrames();
+        void destroyFrames();
+
+        void createRenderTargets();
+        void destroyRenderTargets();
+
+        void createCommandResources();
+        void destroyCommandResources();
+
+        void createTransferResources();
+        void destroyTransferResources();
+
+        void initImGui();
+        void cleanupImGui();
     };
 
 } // namespace cp_api

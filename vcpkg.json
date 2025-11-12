@@ -4,12 +4,19 @@
     "fmt",
     "glfw3",
     "glm",
+    {
+      "name": "imgui",
+      "features": [
+        "glfw-binding",
+        "vulkan-binding"
+      ]
+    },
     "mbedtls",
     "nlohmann-json",
+    "stb",
     "vulkan",
     "vulkan-headers",
     "vulkan-memory-allocator",
-    "zlib",
-    "stb"
+    "zlib"
   ]
 }

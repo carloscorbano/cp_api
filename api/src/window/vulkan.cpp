@@ -16,11 +16,13 @@ namespace cp_api {
         createDebugMessenger();
         pickPhysicalDevice();
         createLogicalDevice();
-        m_swapchain = createSwapchain();
+        createVmaAllocator();
+        m_swapchain = createSwapchain(VK_PRESENT_MODE_FIFO_KHR);
     }
 
     Vulkan::~Vulkan() {
         destroySwapchain(&m_swapchain);
+        destroyVmaAllocator();
         destroyLogicalDevice();
         destroyDebugMessenger();
         destroySurface();
@@ -39,12 +41,45 @@ namespace cp_api {
         return VK_NULL_HANDLE;
     }
 
-    void Vulkan::RecreateSwapchain(bool useOldSwapchain) {
+    void Vulkan::RecreateSwapchain(VkPresentModeKHR preferredMode, bool useOldSwapchain) {
         vkDeviceWaitIdle(m_device);
 
         Swapchain oldSwapchain = m_swapchain;
-        m_swapchain = createSwapchain(useOldSwapchain ? &oldSwapchain : nullptr);
+        m_swapchain = createSwapchain(preferredMode, useOldSwapchain ? &oldSwapchain : nullptr);
         destroySwapchain(&oldSwapchain);
+    }
+
+    VkCommandBuffer Vulkan::BeginSingleTimeCommands(VkCommandPool commandPool) {
+        VkCommandBufferAllocateInfo allocInfo{};
+        allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        allocInfo.commandPool = commandPool;
+        allocInfo.commandBufferCount = 1;
+
+        VkCommandBuffer commandBuffer;
+        vkAllocateCommandBuffers(GetDevice(), &allocInfo, &commandBuffer);
+
+        VkCommandBufferBeginInfo beginInfo{};
+        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+        vkBeginCommandBuffer(commandBuffer, &beginInfo);
+
+        return commandBuffer;
+    }
+
+    void Vulkan::EndSingleTimeCommands(VkCommandPool commandPool, VkCommandBuffer commandBuffer) {
+        vkEndCommandBuffer(commandBuffer);
+
+        VkSubmitInfo submitInfo{};
+        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submitInfo.commandBufferCount = 1;
+        submitInfo.pCommandBuffers = &commandBuffer;
+
+        vkQueueSubmit(GetQueue(QueueType::TRANSFER), 1, &submitInfo, VK_NULL_HANDLE);
+        vkQueueWaitIdle(GetQueue(QueueType::TRANSFER));
+
+        vkFreeCommandBuffers(GetDevice(), commandPool, 1, &commandBuffer);
     }
 
 #pragma region VULKAN_INITIALIZATION
@@ -249,6 +284,8 @@ namespace cp_api {
         enabled11.pNext = &enabled12;
         enabled12.pNext = &enabled13;
 
+        enabled12.timelineSemaphore = VK_TRUE;
+
         // --- 4) Ativar só o que a GPU suporta ---
 
         // Vulkan 1.0 features
@@ -335,11 +372,41 @@ namespace cp_api {
         }
     }
 
-    Vulkan::Swapchain Vulkan::createSwapchain(Vulkan::Swapchain* oldSwapchain) {
+    void Vulkan::createVmaAllocator() {
+        VmaAllocatorCreateInfo allocatorInfo{};
+        allocatorInfo.physicalDevice = m_physDevice;
+        allocatorInfo.device = m_device;
+        allocatorInfo.instance = m_instance;
+        allocatorInfo.vulkanApiVersion = VK_API_VERSION_1_3;
+        allocatorInfo.pAllocationCallbacks = nullptr;
+        allocatorInfo.pDeviceMemoryCallbacks = nullptr;
+        allocatorInfo.flags = 0;
+
+        // Try to enable memory budget extension support if available in this build of VMA
+    #ifdef VMA_ALLOCATOR_CREATE_EXT_MEMORY_BUDGET_BIT
+        allocatorInfo.flags |= VMA_ALLOCATOR_CREATE_EXT_MEMORY_BUDGET_BIT;
+    #endif
+
+        if (vmaCreateAllocator(&allocatorInfo, &m_vmaAllocator) != VK_SUCCESS) {
+            CP_LOG_THROW("Failed to create VMA allocator!");
+        }
+
+        CP_LOG_INFO("VMA allocator created successfully");
+    }
+
+    void Vulkan::destroyVmaAllocator() {
+        if (m_vmaAllocator != VK_NULL_HANDLE && m_vmaAllocator != nullptr) {
+            vmaDestroyAllocator(m_vmaAllocator);
+            m_vmaAllocator = nullptr;
+            CP_LOG_INFO("VMA allocator destroyed");
+        }
+    }
+
+    Vulkan::Swapchain Vulkan::createSwapchain(VkPresentModeKHR preferredMode, Vulkan::Swapchain* oldSwapchain) {
         SwapChainSupportDetails swapChainSupport = querySwapChainSupport(m_physDevice, m_surface);
 
         VkSurfaceFormat2KHR format = chooseSwapSurfaceFormat(swapChainSupport.formats);
-        VkPresentModeKHR presentMode = chooseSwapPresentMode(swapChainSupport.presentModes);
+        VkPresentModeKHR presentMode = chooseSwapPresentMode(swapChainSupport.presentModes, preferredMode);
         VkExtent2D extent = chooseSwapExtent(swapChainSupport.capabilities);
 
         uint32_t imageCount = swapChainSupport.capabilities.surfaceCapabilities.minImageCount + 1;
@@ -357,7 +424,7 @@ namespace cp_api {
         createInfo.imageColorSpace = format.surfaceFormat.colorSpace;
         createInfo.imageExtent = extent;
         createInfo.imageArrayLayers = 1;
-        createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+        createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
 
         uint32_t queueFamilyIndices[] = {m_familyIndices.graphicsFamily.value(), m_familyIndices.presentFamily.value()};
 
@@ -727,8 +794,13 @@ namespace cp_api {
         return availableFormats[0];
     }
 
-    VkPresentModeKHR Vulkan::chooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes) {
+    VkPresentModeKHR Vulkan::chooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes, VkPresentModeKHR preferredMode) {
+        if (std::find(availablePresentModes.begin(), availablePresentModes.end(), preferredMode) != availablePresentModes.end()) {
+            return preferredMode;
+        }
+
         for (const auto& availablePresentMode : availablePresentModes) {
+
             if (availablePresentMode == VK_PRESENT_MODE_MAILBOX_KHR) {
                 return availablePresentMode;
             }
@@ -793,6 +865,7 @@ namespace cp_api {
         logFeature("uniformBufferStandardLayout", supported12.uniformBufferStandardLayout, enabled12.uniformBufferStandardLayout);
         logFeature("separateDepthStencilLayouts", supported12.separateDepthStencilLayouts, enabled12.separateDepthStencilLayouts);
         logFeature("hostQueryReset", supported12.hostQueryReset, enabled12.hostQueryReset);
+        logFeature("timeline semaphore", supported12.timelineSemaphore, enabled12.timelineSemaphore);
 
         CP_LOG_INFO(">> Vulkan 1.3 Features");
         logFeature("dynamicRendering", supported13.dynamicRendering, enabled13.dynamicRendering);

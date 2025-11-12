@@ -25,6 +25,7 @@ add_library(cp_api STATIC
     src/window/vkBuffer.cpp
     src/window/vkImage.cpp
     src/window/vkTexture.cpp
+    src/window/imgui.inc.cpp
     
     src/containers/ntree.cpp
     src/containers/spatialTree.cpp
@@ -56,6 +57,7 @@ find_package(ZLIB REQUIRED)
 find_package(glfw3 CONFIG REQUIRED)
 find_package(Stb REQUIRED)
 find_package(EnTT CONFIG REQUIRED)
+find_package(imgui CONFIG REQUIRED)
 
 # find_package(OpenGL REQUIRED) #for test usage only
 
@@ -67,6 +69,7 @@ target_link_libraries(cp_api
         ZLIB::ZLIB
         EnTT::EnTT
         glfw
+        imgui::imgui
         # OpenGL::GL
     PUBLIC
         fmt::fmt

@@ -3,6 +3,7 @@
 #include "glfw.inc.hpp"
 #include <vector>
 #include <optional>
+#include "vma.inc.hpp"
 
 #ifdef NDEBUG
     const bool enableValidationLayers = false;
@@ -65,7 +66,13 @@ namespace cp_api {
 
         VkQueue GetQueue(QueueType type) const;
 
-        void RecreateSwapchain(bool useOldSwapchain = false);
+        void RecreateSwapchain(VkPresentModeKHR preferredMode = VK_PRESENT_MODE_FIFO_KHR, bool useOldSwapchain = false);
+        Swapchain& GetSwapchain() { return m_swapchain; }
+        VmaAllocator GetVmaAllocator() { return m_vmaAllocator; }
+        QueueFamilyIndices GetQueueFamilyIndices() const { return m_familyIndices; }
+
+        VkCommandBuffer BeginSingleTimeCommands(VkCommandPool commandPool);
+        void EndSingleTimeCommands(VkCommandPool commandPool, VkCommandBuffer commandBuffer);
 
     private:
         void createInstance();
@@ -82,7 +89,10 @@ namespace cp_api {
         void createLogicalDevice();
         void destroyLogicalDevice();
 
-        Swapchain createSwapchain(Swapchain* oldSwapchain = nullptr);
+        void createVmaAllocator();
+        void destroyVmaAllocator();
+
+        Swapchain createSwapchain(VkPresentModeKHR preferredMode, Swapchain* oldSwapchain = nullptr);
         void destroySwapchain(Swapchain* swapchain);
 
         std::vector<const char*> getGlfwRequiredExtensions();
@@ -93,7 +103,7 @@ namespace cp_api {
         QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKHR surface);
         SwapChainSupportDetails querySwapChainSupport(VkPhysicalDevice device, VkSurfaceKHR surface);
         VkSurfaceFormat2KHR chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormat2KHR>& availableFormats);
-        VkPresentModeKHR chooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes);
+        VkPresentModeKHR chooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes, VkPresentModeKHR preferredMode);
         VkExtent2D chooseSwapExtent(const VkSurfaceCapabilities2KHR& capabilities);
 
         void logDeviceFeatures(
@@ -118,9 +128,10 @@ namespace cp_api {
 
         std::vector<const char*>    m_validationLayers = { "VK_LAYER_KHRONOS_validation" };
         std::vector<const char*>    m_requiredExtensions = { VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME };
-        std::vector<const char*>    m_deviceExtensions = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
+        std::vector<const char*>    m_deviceExtensions = { VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME };
         VkDebugUtilsMessengerEXT    m_debugMessenger = VK_NULL_HANDLE;
 
         Swapchain                   m_swapchain;
+        VmaAllocator                m_vmaAllocator = VK_NULL_HANDLE;
     };
 } // namespace cp_api
