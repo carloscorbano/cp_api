@@ -26,6 +26,7 @@ add_library(cp_api STATIC
     src/window/vkImage.cpp
     src/window/vkTexture.cpp
     src/window/imgui.inc.cpp
+    src/window/renderer.cpp
     
     src/containers/ntree.cpp
     src/containers/spatialTree.cpp

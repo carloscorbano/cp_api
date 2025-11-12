@@ -82,6 +82,12 @@ namespace cp_api {
         vkFreeCommandBuffers(GetDevice(), commandPool, 1, &commandBuffer);
     }
 
+    void Vulkan::RecreateSurface() {
+        vkDeviceWaitIdle(m_device);
+        destroySurface();
+        createSurface();
+    }
+
 #pragma region VULKAN_INITIALIZATION
 
     void Vulkan::createInstance() {

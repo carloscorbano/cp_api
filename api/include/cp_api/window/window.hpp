@@ -1,9 +1,8 @@
 #pragma once
 
-#include "glfw.inc.hpp"
+#include "renderer.hpp"
 #include "inputManager.hpp"
 #include "vulkan.hpp"
-#include "frame.hpp"
 #include "imgui.inc.hpp"
 #include "cp_api/core/events.hpp"
 #include <functional>
@@ -11,8 +10,6 @@
 #include <stdexcept>
 #include <vector>
 #include <memory>
-#include <thread>
-#include <atomic>
 #include <chrono>
 
 namespace cp_api {
@@ -21,6 +18,11 @@ namespace cp_api {
         Windowed,
         Borderless,
         Fullscreen
+    };
+
+    struct onWindowDragStopEvent : public Event {
+        GLFWwindow* window;
+        onWindowDragStopEvent(GLFWwindow* wnd) : window(wnd) {}
     };
 
     struct onWindowModeChangedEvent : public Event {
@@ -68,7 +70,6 @@ namespace cp_api {
     class World;
     class ThreadPool;
     class Window {
-        const uint32_t SIMULTANEOS_WORKERS_RECORDING_COUNT = 2;
     public:
         Window(int width, int height, const char* title);
         ~Window();
@@ -114,9 +115,15 @@ namespace cp_api {
         Vulkan& GetVulkan() { return *m_vulkan; }
 
         EventDispatcher& GetEventDispatcher() { return m_eventDispatcher; }
+        Renderer& GetRenderer() { return *m_renderer; }
 
-    private:
-        void renderWorker();
+        bool IsVSyncEnabled() const { return m_vsyncEnabled; }
+        void SetVSyncEnabled(bool enabled) { m_vsyncEnabled = enabled; }
+
+        bool IsDragging() const { return m_isDragging.load(); }
+
+        GLFWwindow* GetGLFWHandle() const { return m_wndHandle; }
+
     private:
         static void GLFW_WindowSizeCallback(GLFWwindow* window, int width, int height);
         static void GLFW_WindowPosCallback(GLFWwindow* window, int xpos, int ypos);
@@ -141,45 +148,11 @@ namespace cp_api {
 
         std::unique_ptr<InputManager> m_input;
         std::unique_ptr<Vulkan> m_vulkan;
-
-        std::thread m_renderThread;
-
-        std::atomic<bool> m_renderEnabled { true };
-        std::atomic<bool> m_swapchainIsDirty { false };
-        std::atomic<bool> m_skipAfterSwapchainRecreation { false };
-        std::atomic<bool> m_iconified { false };
-
-        std::vector<Frame> m_frames;
-        VkSemaphore m_timelineSem = VK_NULL_HANDLE;  
-
-        uint32_t m_writeFrameIndex = 0;
-        uint32_t m_readFrameIndex = 0;
-
-        VkCommandPool m_transferCmdPool = VK_NULL_HANDLE;
-        VkCommandBuffer m_transferCmdBuffer = VK_NULL_HANDLE;
+        std::unique_ptr<Renderer> m_renderer;
+        bool m_vsyncEnabled = true;
 
         std::chrono::steady_clock::time_point m_lastDragTime;
         std::atomic<bool> m_isDragging { false };
-
-        bool m_vsyncEnabled = true;
-
-        VkDescriptorPool m_imguiPool;
-
-    private:
-        void createFrames();
-        void destroyFrames();
-
-        void createRenderTargets();
-        void destroyRenderTargets();
-
-        void createCommandResources();
-        void destroyCommandResources();
-
-        void createTransferResources();
-        void destroyTransferResources();
-
-        void initImGui();
-        void cleanupImGui();
     };
 
 } // namespace cp_api

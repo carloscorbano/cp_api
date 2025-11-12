@@ -74,6 +74,8 @@ namespace cp_api {
         VkCommandBuffer BeginSingleTimeCommands(VkCommandPool commandPool);
         void EndSingleTimeCommands(VkCommandPool commandPool, VkCommandBuffer commandBuffer);
 
+        void RecreateSurface();
+
     private:
         void createInstance();
         void destroyInstance();
