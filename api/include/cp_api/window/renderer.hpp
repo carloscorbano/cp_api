@@ -35,7 +35,17 @@ namespace cp_api {
         void initImGui();
         void cleanupImGui();
 
+        void createRenderFinishedSemaphores();
+        void destroyRenderFinishedSemaphores();
+
         void renderThreadWork();
+
+        bool isRenderEnabled() const;
+
+        VkResult BeginCommandBuffer(VkCommandBuffer cmdBuffer, 
+                                    const std::vector<VkFormat>& colorAttachments, 
+                                    const VkFormat& depthFormat, 
+                                    const VkSampleCountFlagBits& rasterizationSamples = VK_SAMPLE_COUNT_1_BIT);
     private:
         Window& m_window;
 
@@ -55,6 +65,7 @@ namespace cp_api {
         VkCommandPool m_transferCmdPool = VK_NULL_HANDLE;
         VkCommandBuffer m_transferCmdBuffer = VK_NULL_HANDLE;
 
+        std::vector<VkSemaphore> m_renderFinishedSemaphores;
 
         VkDescriptorPool m_imguiPool;
     };
