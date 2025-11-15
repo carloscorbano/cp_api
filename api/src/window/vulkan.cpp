@@ -88,6 +88,64 @@ namespace cp_api {
         createSurface();
     }
 
+    VkResult Vulkan::BeginCommandBuffer(  VkCommandBuffer cmdBuffer, 
+                                            const std::vector<VkFormat>& colorAttachments, 
+                                            const VkFormat& depthFormat, 
+                                            const VkSampleCountFlagBits& rasterizationSamples) {
+
+        VkCommandBufferInheritanceRenderingInfo inheritanceRenderingInfo{};
+        inheritanceRenderingInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_RENDERING_INFO;
+        inheritanceRenderingInfo.colorAttachmentCount = static_cast<uint32_t>(colorAttachments.size());
+        
+        VkFormat stencilFormat = (depthFormat == VK_FORMAT_D32_SFLOAT) ? VK_FORMAT_UNDEFINED : depthFormat;
+
+        inheritanceRenderingInfo.pColorAttachmentFormats = colorAttachments.data();
+        inheritanceRenderingInfo.depthAttachmentFormat = depthFormat;
+        inheritanceRenderingInfo.stencilAttachmentFormat = stencilFormat;
+        inheritanceRenderingInfo.rasterizationSamples = rasterizationSamples;
+
+        VkCommandBufferInheritanceInfo inh{VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO};
+        inh.pNext = &inheritanceRenderingInfo;
+        inh.renderPass = VK_NULL_HANDLE;
+        inh.subpass = 0;
+        inh.framebuffer = VK_NULL_HANDLE;
+
+        VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+        bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT | VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT;
+        bi.pInheritanceInfo = &inh;
+
+        return vkBeginCommandBuffer(cmdBuffer, &bi);
+    }
+
+    VkFormat Vulkan::GetStencilFormat(const VkFormat& depthFormat) const {
+        return (depthFormat == VK_FORMAT_D24_UNORM_S8_UINT || depthFormat == VK_FORMAT_D32_SFLOAT_S8_UINT) ? depthFormat : VK_FORMAT_UNDEFINED; 
+    }
+
+    VkResult Vulkan::AcquireSwapchainNextImage(VkSemaphore availableSemaphore, uint32_t* outIndex,  uint64_t timeout) {
+        return vkAcquireNextImageKHR(GetDevice(), GetSwapchain().handler, timeout, availableSemaphore, VK_NULL_HANDLE, outIndex);
+    }
+
+    void Vulkan::SignalTimelineSemaphore(VkSemaphore semaphore, const uint64_t& value) {
+        VkSemaphoreSignalInfo signalInfo{ VK_STRUCTURE_TYPE_SEMAPHORE_SIGNAL_INFO };
+        signalInfo.pNext = nullptr;
+        signalInfo.semaphore = semaphore;
+        signalInfo.value = value;
+        if(vkSignalSemaphore(GetDevice(), &signalInfo) != VK_SUCCESS) {
+            CP_LOG_THROW("Failed to signal timeline semaphore!");
+        }
+    }
+
+    void Vulkan::WaitTimelineSemaphores(const std::vector<VkSemaphore>& semaphores, const std::vector<uint64_t>& values, const uint64_t& timeout) {
+        VkSemaphoreWaitInfo waitInfo{ VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO };
+        waitInfo.semaphoreCount = (uint32_t)semaphores.size();
+        waitInfo.pSemaphores = semaphores.data();
+        waitInfo.pValues = values.data();
+
+        if(vkWaitSemaphores(GetDevice(), &waitInfo, timeout) != VK_SUCCESS) {
+            CP_LOG_THROW("Failed to wait timeline semaphore!");
+        }
+    }
+
 #pragma region VULKAN_INITIALIZATION
 
     void Vulkan::createInstance() {

@@ -10,8 +10,9 @@ namespace cp_api {
     class World;
     class ThreadPool;
     class Window;
+    class Vulkan;
     class Renderer {
-        const uint32_t SIMULTANEOS_WORKERS_RECORDING_COUNT = 2;
+        const uint32_t SIMULTANEOS_WORKERS_RECORDING_COUNT = 4;
     public:
         Renderer(Window& window);
         ~Renderer();
@@ -42,18 +43,20 @@ namespace cp_api {
 
         bool isRenderEnabled() const;
 
-        VkResult BeginCommandBuffer(VkCommandBuffer cmdBuffer, 
-                                    const std::vector<VkFormat>& colorAttachments, 
-                                    const VkFormat& depthFormat, 
-                                    const VkSampleCountFlagBits& rasterizationSamples = VK_SAMPLE_COUNT_1_BIT);
+
+    private:
+        void checkSwapchainAndRecreation();
+
+        void createRenderTargetImages(const uint32_t& width, const uint32_t& height, const VkFormat& format, RenderTarget* target);
+
     private:
         Window& m_window;
+        Vulkan& m_vulkan;
 
         std::thread m_renderThread;
         std::atomic<bool> m_renderEnabled { true };
         std::atomic<bool> m_swapchainIsDirty { false };
         std::atomic<bool> m_skipAfterSwapchainRecreation { false };
-        std::atomic<bool> m_iconified { false };
         std::atomic<bool> m_surfaceLost { false };
 
         std::vector<Frame> m_frames;

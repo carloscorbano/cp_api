@@ -76,6 +76,18 @@ namespace cp_api {
 
         void RecreateSurface();
 
+        VkResult BeginCommandBuffer(VkCommandBuffer cmdBuffer, 
+                            const std::vector<VkFormat>& colorAttachments, 
+                            const VkFormat& depthFormat, 
+                            const VkSampleCountFlagBits& rasterizationSamples = VK_SAMPLE_COUNT_1_BIT);
+
+        VkFormat GetStencilFormat(const VkFormat& depthFormat) const;
+
+        VkResult AcquireSwapchainNextImage(VkSemaphore availableSemaphore, uint32_t* outIndex,  uint64_t timeout = UINT64_MAX);
+
+        void SignalTimelineSemaphore(VkSemaphore semaphore, const uint64_t& value);
+        void WaitTimelineSemaphores(const std::vector<VkSemaphore>& semaphores, const std::vector<uint64_t>& values, const uint64_t& timeout = UINT64_MAX);
+
     private:
         void createInstance();
         void destroyInstance();

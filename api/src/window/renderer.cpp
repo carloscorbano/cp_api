@@ -7,7 +7,7 @@
 namespace cp_api {
 
     Renderer::Renderer(Window& window) 
-        : m_window(window) {
+        : m_window(window), m_vulkan(window.GetVulkan()) {
         CP_LOG_INFO("[RENDERER] Renderer created");
         setupEventListeners();
         createFrames();
@@ -25,7 +25,7 @@ namespace cp_api {
         if (m_renderThread.joinable())
             m_renderThread.join();
 
-        vkDeviceWaitIdle(m_window.GetVulkan().GetDevice());
+        vkDeviceWaitIdle(m_vulkan.GetDevice());
 
         destroyRenderFinishedSemaphores();
         cleanupImGui();
@@ -47,7 +47,7 @@ namespace cp_api {
         {
             auto task = threadPool.Submit(TaskPriority::HIGH, [](Renderer* renderer, const Frame& f, const uint32_t& index) -> VkResult
             {
-                auto result = renderer->BeginCommandBuffer(f.secondaries[index], { f.renderTarget.format }, f.depthStencilTarget.format);
+                auto result = renderer->m_vulkan.BeginCommandBuffer(f.secondaries[index], { f.renderTarget.colorFormat }, f.renderTarget.depthFormat);
                 if(result != VK_SUCCESS) return result;
                 {
                     //DRAW COMMANDS
@@ -107,7 +107,7 @@ namespace cp_api {
         ImGui::Render();
         auto& ImGuiCmdBuf = frame.secondaries[frame.secondaries.size() - 1];
 
-        if(BeginCommandBuffer(ImGuiCmdBuf, { frame.renderTarget.format }, frame.depthStencilTarget.format) != VK_SUCCESS) {
+        if(m_vulkan.BeginCommandBuffer(ImGuiCmdBuf, { frame.renderTarget.colorFormat }, frame.renderTarget.depthFormat) != VK_SUCCESS) {
             CP_LOG_THROW("Failed to begin imgui buffer!");        
         }
 
@@ -121,25 +121,10 @@ namespace cp_api {
         // ------------------------------------- END IMGUI
 
         //signal timeline semaphore to indicate frame is ready for rendering
-        VkSemaphoreSignalInfo signalInfo{ VK_STRUCTURE_TYPE_SEMAPHORE_SIGNAL_INFO };
-        signalInfo.pNext = nullptr;
-        signalInfo.semaphore = m_timelineSem;
-        signalInfo.value = frame.recordValue;
-        if(vkSignalSemaphore(m_window.GetVulkan().GetDevice(), &signalInfo) != VK_SUCCESS) {
-            CP_LOG_THROW("Failed to signal timeline semaphore!");
-        }
-
+        m_vulkan.SignalTimelineSemaphore(m_timelineSem, frame.recordValue);
+        
         //wait timeline semaphore 
-        std::vector<VkSemaphore> semaphores = { m_timelineSem };
-        std::vector<uint64_t> semValues = { frame.renderValue };
-
-        VkSemaphoreWaitInfo waitInfo{ VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO };
-        waitInfo.semaphoreCount = (uint32_t)semaphores.size();
-        waitInfo.pSemaphores = semaphores.data();
-        waitInfo.pValues = semValues.data();
-        if(vkWaitSemaphores(m_window.GetVulkan().GetDevice(), &waitInfo, UINT64_MAX) != VK_SUCCESS) {
-            CP_LOG_THROW("Failed to wait timeline semaphore!");
-        }
+        m_vulkan.WaitTimelineSemaphores({ m_timelineSem }, { frame.renderValue });
 
         //update for next frame
         frame.renderValue += (2 * (uint32_t)m_frames.size());
@@ -160,7 +145,6 @@ namespace cp_api {
             // Handle window minimize event
             CP_LOG_INFO("[RENDERER] Window minimized: {}", e.minimized ? "Yes" : "No");
             m_renderEnabled.store(!e.minimized);
-            m_iconified.store(e.minimized);
             m_swapchainIsDirty.store(true);
         });
     }
@@ -168,7 +152,7 @@ namespace cp_api {
     void Renderer::createFrames() {
         if(m_frames.size() > 0) return;
 
-        m_frames.resize(m_window.GetVulkan().GetSwapchain().images.size());
+        m_frames.resize(m_vulkan.GetSwapchain().images.size());
 
         //create sync objects (timeline semaphore)
         VkSemaphoreTypeCreateInfo timelineCreateInfo{};
@@ -180,7 +164,7 @@ namespace cp_api {
         semInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
         semInfo.pNext = &timelineCreateInfo;
 
-        if(vkCreateSemaphore(m_window.GetVulkan().GetDevice(), &semInfo, nullptr, &m_timelineSem) != VK_SUCCESS) {
+        if(vkCreateSemaphore(m_vulkan.GetDevice(), &semInfo, nullptr, &m_timelineSem) != VK_SUCCESS) {
             CP_LOG_THROW("Failed to create timeline semaphore!");
         }
 
@@ -193,7 +177,7 @@ namespace cp_api {
         for(auto& frame : m_frames) {
             int curIndex = i++;
 
-            if(vkCreateSemaphore(m_window.GetVulkan().GetDevice(), &semaphoreInfo, nullptr, &frame.imageAvailable) != VK_SUCCESS) {
+            if(vkCreateSemaphore(m_vulkan.GetDevice(), &semaphoreInfo, nullptr, &frame.imageAvailable) != VK_SUCCESS) {
                 CP_LOG_THROW("Failed to create binary semaphore!");
             }
 
@@ -209,7 +193,7 @@ namespace cp_api {
     void Renderer::destroyFrames() {
         for(auto& frame : m_frames) {
             if(frame.imageAvailable != VK_NULL_HANDLE) {
-                vkDestroySemaphore(m_window.GetVulkan().GetDevice(), frame.imageAvailable, nullptr);
+                vkDestroySemaphore(m_vulkan.GetDevice(), frame.imageAvailable, nullptr);
                 frame.imageAvailable = VK_NULL_HANDLE;
             }
         }
@@ -218,77 +202,22 @@ namespace cp_api {
         destroyRenderTargets();
 
         if(m_timelineSem != VK_NULL_HANDLE) {
-            vkDestroySemaphore(m_window.GetVulkan().GetDevice(), m_timelineSem, nullptr);
+            vkDestroySemaphore(m_vulkan.GetDevice(), m_timelineSem, nullptr);
             m_timelineSem = VK_NULL_HANDLE;
         }
     }
 
     void Renderer::createRenderTargets() {
-        uint32_t i = 0;
-        for(auto& frame : m_frames) {
-            int curIndex = i++;
-
-            frame.renderTarget = CreateImage(m_window.GetVulkan().GetDevice(), m_window.GetVulkan().GetVmaAllocator(),
-                m_window.GetVulkan().GetSwapchain().extent.width, m_window.GetVulkan().GetSwapchain().extent.height,
-                m_window.GetVulkan().GetSwapchain().format,
-                VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-                VMA_MEMORY_USAGE_GPU_ONLY, 
-                VK_IMAGE_ASPECT_COLOR_BIT);
-
-            //depth stencil
-            VkFormat depthFormats[] = 
-            {
-                VK_FORMAT_D32_SFLOAT_S8_UINT,
-                VK_FORMAT_D24_UNORM_S8_UINT,
-                VK_FORMAT_D32_SFLOAT
-            };
-
-            VkFormat depthFormat = VK_FORMAT_UNDEFINED;
-            for (VkFormat format : depthFormats) 
-            {
-                VkFormatProperties props;
-                vkGetPhysicalDeviceFormatProperties(m_window.GetVulkan().GetPhysicalDevice(), format, &props);
-                if (props.optimalTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT) {
-                    depthFormat = format;
-                    break;
-                }
-            }
-
-            if(depthFormat == VK_FORMAT_UNDEFINED)
-                CP_LOG_THROW("Failed to choose a depth/stencil format");
-
-            VkImageAspectFlags depthAspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-            if (depthFormat == VK_FORMAT_D32_SFLOAT_S8_UINT || depthFormat == VK_FORMAT_D24_UNORM_S8_UINT)
-            {
-                depthAspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
-            }
-
-            frame.depthStencilTarget = CreateImage(m_window.GetVulkan().GetDevice(), m_window.GetVulkan().GetVmaAllocator(),
-                m_window.GetVulkan().GetSwapchain().extent.width, m_window.GetVulkan().GetSwapchain().extent.height,
-                depthFormat,
-                VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
-                VMA_MEMORY_USAGE_GPU_ONLY,
-                depthAspectMask);
-
-            std::function<std::string(VkFormat)> depthToStr = [](VkFormat format)
-            {
-                switch (format)
-                {
-                case VK_FORMAT_D32_SFLOAT_S8_UINT: return "VK_FORMAT_D32_SFLOAT_S8_UINT";
-                case VK_FORMAT_D24_UNORM_S8_UINT: return "VK_FORMAT_D24_UNORM_S8_UINT";
-                case VK_FORMAT_D32_SFLOAT: return "VK_FORMAT_D32_SFLOAT";
-                default: return "";
-                }
-            };
-
-            CP_LOG_INFO("[WINDOW] Created render targets for frame [{}] - depth format {}", curIndex, depthToStr(depthFormat));
+        auto& swp = m_vulkan.GetSwapchain();
+        for(auto& frame : m_frames) {           
+            createRenderTargetImages(swp.extent.width, swp.extent.height, swp.format, &frame.renderTarget);
         }
     }
 
     void Renderer::destroyRenderTargets() {
         for(auto& frame : m_frames) {
-            DestroyImage(m_window.GetVulkan().GetDevice(), m_window.GetVulkan().GetVmaAllocator(), frame.renderTarget);
-            DestroyImage(m_window.GetVulkan().GetDevice(), m_window.GetVulkan().GetVmaAllocator(), frame.depthStencilTarget);
+            DestroyImage(m_vulkan.GetDevice(), m_vulkan.GetVmaAllocator(), frame.renderTarget.color);
+            DestroyImage(m_vulkan.GetDevice(), m_vulkan.GetVmaAllocator(), frame.renderTarget.depth);
         }
     }
 
@@ -304,9 +233,9 @@ namespace cp_api {
                 VkCommandPoolCreateInfo poolInfo{};
                 poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
                 poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-                poolInfo.queueFamilyIndex = m_window.GetVulkan().GetQueueFamilyIndices().graphicsFamily.value();
+                poolInfo.queueFamilyIndex = m_vulkan.GetQueueFamilyIndices().graphicsFamily.value();
 
-                if(vkCreateCommandPool(m_window.GetVulkan().GetDevice(), &poolInfo, nullptr, &frame.cmdPool[j]) != VK_SUCCESS) {
+                if(vkCreateCommandPool(m_vulkan.GetDevice(), &poolInfo, nullptr, &frame.cmdPool[j]) != VK_SUCCESS) {
                     CP_LOG_THROW("Failed to create command pool for frame {}", curIndex);
                 }
 
@@ -316,7 +245,7 @@ namespace cp_api {
                 allocInfo.commandPool = frame.cmdPool[j];
                 allocInfo.level = VK_COMMAND_BUFFER_LEVEL_SECONDARY;
                 allocInfo.commandBufferCount = 1;
-                if(vkAllocateCommandBuffers(m_window.GetVulkan().GetDevice(), &allocInfo, &frame.secondaries[j]) != VK_SUCCESS) {
+                if(vkAllocateCommandBuffers(m_vulkan.GetDevice(), &allocInfo, &frame.secondaries[j]) != VK_SUCCESS) {
                     CP_LOG_THROW("Failed to allocate command buffer for frame {}", curIndex);
                 }
             }
@@ -326,10 +255,10 @@ namespace cp_api {
             VkCommandPoolCreateInfo imguiPoolInfo {};
             imguiPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
             imguiPoolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-            imguiPoolInfo.queueFamilyIndex = m_window.GetVulkan().GetQueueFamilyIndices().graphicsFamily.value();
+            imguiPoolInfo.queueFamilyIndex = m_vulkan.GetQueueFamilyIndices().graphicsFamily.value();
             imguiPoolInfo.pNext = nullptr;
             
-            if(vkCreateCommandPool(m_window.GetVulkan().GetDevice(), &imguiPoolInfo, nullptr, &frame.cmdPool[offset]) != VK_SUCCESS) {
+            if(vkCreateCommandPool(m_vulkan.GetDevice(), &imguiPoolInfo, nullptr, &frame.cmdPool[offset]) != VK_SUCCESS) {
                 CP_LOG_THROW("Failed to create ImGui command pool for frame {}", curIndex);
             }
 
@@ -339,7 +268,7 @@ namespace cp_api {
             imguiAllocInfo.commandPool = frame.cmdPool[offset];
             imguiAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_SECONDARY;
             imguiAllocInfo.commandBufferCount = 1;
-            if(vkAllocateCommandBuffers(m_window.GetVulkan().GetDevice(), &imguiAllocInfo, &frame.secondaries[frame.secondaries.size() - 1]) != VK_SUCCESS) {
+            if(vkAllocateCommandBuffers(m_vulkan.GetDevice(), &imguiAllocInfo, &frame.secondaries[frame.secondaries.size() - 1]) != VK_SUCCESS) {
                 CP_LOG_THROW("Failed to allocate ImGui command buffer for frame {}", curIndex);
             }
 
@@ -347,8 +276,8 @@ namespace cp_api {
             VkCommandPoolCreateInfo primaryPoolInfo{};
             primaryPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
             primaryPoolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-            primaryPoolInfo.queueFamilyIndex = m_window.GetVulkan().GetQueueFamilyIndices().graphicsFamily.value();
-            if(vkCreateCommandPool(m_window.GetVulkan().GetDevice(), &primaryPoolInfo, nullptr, &frame.cmdPool[offset + 1]) != VK_SUCCESS) {
+            primaryPoolInfo.queueFamilyIndex = m_vulkan.GetQueueFamilyIndices().graphicsFamily.value();
+            if(vkCreateCommandPool(m_vulkan.GetDevice(), &primaryPoolInfo, nullptr, &frame.cmdPool[offset + 1]) != VK_SUCCESS) {
                 CP_LOG_THROW("Failed to create primary command pool for frame {}", curIndex);
             }
 
@@ -358,7 +287,7 @@ namespace cp_api {
             primaryAllocInfo.commandPool = frame.cmdPool[offset + 1];
             primaryAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
             primaryAllocInfo.commandBufferCount = 1;
-            if(vkAllocateCommandBuffers(m_window.GetVulkan().GetDevice(), &primaryAllocInfo, &frame.primary) != VK_SUCCESS) {
+            if(vkAllocateCommandBuffers(m_vulkan.GetDevice(), &primaryAllocInfo, &frame.primary) != VK_SUCCESS) {
                 CP_LOG_THROW("Failed to allocate primary command buffer for frame {}", curIndex);
             }
         }
@@ -368,7 +297,7 @@ namespace cp_api {
         for(auto& frame : m_frames) {
             for(auto& cmdPool : frame.cmdPool) {
                 if(cmdPool != VK_NULL_HANDLE) {
-                    vkDestroyCommandPool(m_window.GetVulkan().GetDevice(), cmdPool, nullptr);
+                    vkDestroyCommandPool(m_vulkan.GetDevice(), cmdPool, nullptr);
                     cmdPool = VK_NULL_HANDLE;
                 }
             }
@@ -381,10 +310,10 @@ namespace cp_api {
     void Renderer::createTransferResources() {
         VkCommandPoolCreateInfo poolInfo = {};
         poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-        poolInfo.queueFamilyIndex = m_window.GetVulkan().GetQueueFamilyIndices().transferFamily.value();
+        poolInfo.queueFamilyIndex = m_vulkan.GetQueueFamilyIndices().transferFamily.value();
         poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
 
-        if(vkCreateCommandPool(m_window.GetVulkan().GetDevice(), &poolInfo, nullptr, &m_transferCmdPool) != VK_SUCCESS) {
+        if(vkCreateCommandPool(m_vulkan.GetDevice(), &poolInfo, nullptr, &m_transferCmdPool) != VK_SUCCESS) {
             CP_LOG_THROW("Failed to create transfer command pool!");
         }
 
@@ -394,14 +323,14 @@ namespace cp_api {
         allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
         allocInfo.commandBufferCount = 1;
 
-        if(vkAllocateCommandBuffers(m_window.GetVulkan().GetDevice(), &allocInfo, &m_transferCmdBuffer) != VK_SUCCESS) {
+        if(vkAllocateCommandBuffers(m_vulkan.GetDevice(), &allocInfo, &m_transferCmdBuffer) != VK_SUCCESS) {
             CP_LOG_THROW("Failed to allocate transfer command buffer!");
         }
     }
 
     void Renderer::destroyTransferResources() {
         if(m_transferCmdPool != VK_NULL_HANDLE) {
-            vkDestroyCommandPool(m_window.GetVulkan().GetDevice(), m_transferCmdPool, nullptr);
+            vkDestroyCommandPool(m_vulkan.GetDevice(), m_transferCmdPool, nullptr);
             m_transferCmdPool = VK_NULL_HANDLE;
         }
     }
@@ -429,7 +358,7 @@ namespace cp_api {
         pool_info.poolSizeCount = (uint32_t)IM_ARRAYSIZE(pool_sizes);
         pool_info.pPoolSizes = pool_sizes;
         
-        if (vkCreateDescriptorPool(m_window.GetVulkan().GetDevice(), &pool_info, nullptr, &m_imguiPool) != VK_SUCCESS) {
+        if (vkCreateDescriptorPool(m_vulkan.GetDevice(), &pool_info, nullptr, &m_imguiPool) != VK_SUCCESS) {
             CP_LOG_THROW("Failed to create ImGui descriptor pool!");
         }
 
@@ -438,8 +367,8 @@ namespace cp_api {
         ImGuiIO& io = ImGui::GetIO();
         io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
         io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
-        io.IniFilename = "";
-        io.LogFilename = "";
+        io.IniFilename = nullptr;
+        io.LogFilename = nullptr;
 
         io.Fonts->AddFontDefault();
 
@@ -448,28 +377,28 @@ namespace cp_api {
         ImGui_ImplGlfw_InitForVulkan(m_window.GetGLFWHandle(), true);
 
         ImGui_ImplVulkan_InitInfo init_info = {};
-        init_info.Instance = m_window.GetVulkan().GetInstance();
-        init_info.PhysicalDevice = m_window.GetVulkan().GetPhysicalDevice();
-        init_info.Device = m_window.GetVulkan().GetDevice();
-        init_info.QueueFamily = m_window.GetVulkan().GetQueueFamilyIndices().graphicsFamily.value();
-        init_info.Queue = m_window.GetVulkan().GetQueue(QueueType::GRAPHICS);
+        init_info.Instance = m_vulkan.GetInstance();
+        init_info.PhysicalDevice = m_vulkan.GetPhysicalDevice();
+        init_info.Device = m_vulkan.GetDevice();
+        init_info.QueueFamily = m_vulkan.GetQueueFamilyIndices().graphicsFamily.value();
+        init_info.Queue = m_vulkan.GetQueue(QueueType::GRAPHICS);
         init_info.PipelineCache = VK_NULL_HANDLE;
         init_info.DescriptorPool = m_imguiPool;
         init_info.Subpass = 0;
-        init_info.MinImageCount = 2;
-        init_info.ImageCount = static_cast<uint32_t>(m_window.GetVulkan().GetSwapchain().images.size());
+        init_info.MinImageCount = static_cast<uint32_t>(m_vulkan.GetSwapchain().images.size());
+        init_info.ImageCount = static_cast<uint32_t>(m_vulkan.GetSwapchain().images.size());
         init_info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
         init_info.Allocator = nullptr;
         init_info.CheckVkResultFn = nullptr;
-        init_info.UseDynamicRendering = true;
+        init_info.UseDynamicRendering = VK_TRUE;
         
         VkPipelineRenderingCreateInfoKHR pipelineInfo{};
         pipelineInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR;
         pipelineInfo.colorAttachmentCount = 1;
-        pipelineInfo.pColorAttachmentFormats = &m_frames[0].renderTarget.format;
+        pipelineInfo.pColorAttachmentFormats = &m_frames[0].renderTarget.colorFormat;
 
-        VkFormat depthFormat = m_frames[0].depthStencilTarget.format;
-        VkFormat stencilFormat = (depthFormat == VK_FORMAT_D32_SFLOAT) ? VK_FORMAT_UNDEFINED : depthFormat;
+        VkFormat depthFormat = m_frames[0].renderTarget.depthFormat;
+        VkFormat stencilFormat = m_vulkan.GetStencilFormat(depthFormat);
 
         pipelineInfo.depthAttachmentFormat = depthFormat;
         pipelineInfo.stencilAttachmentFormat = stencilFormat;
@@ -485,23 +414,23 @@ namespace cp_api {
         ImGui::DestroyContext();
 
         if (m_imguiPool != VK_NULL_HANDLE) {
-            vkDestroyDescriptorPool(m_window.GetVulkan().GetDevice(), m_imguiPool, nullptr);
+            vkDestroyDescriptorPool(m_vulkan.GetDevice(), m_imguiPool, nullptr);
             m_imguiPool = VK_NULL_HANDLE;
         }
     }
 
     void Renderer::createRenderFinishedSemaphores() {
-        m_renderFinishedSemaphores.resize(m_window.GetVulkan().GetSwapchain().images.size());
+        m_renderFinishedSemaphores.resize(m_vulkan.GetSwapchain().images.size());
         for(auto& semaphore : m_renderFinishedSemaphores) {
             VkSemaphoreCreateInfo semInfo{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
-            if (vkCreateSemaphore(m_window.GetVulkan().GetDevice(), &semInfo, nullptr, &semaphore) != VK_SUCCESS) CP_LOG_THROW("Failed to create render finished semaphore!");
+            if (vkCreateSemaphore(m_vulkan.GetDevice(), &semInfo, nullptr, &semaphore) != VK_SUCCESS) CP_LOG_THROW("Failed to create render finished semaphore!");
         }   
     }   
 
     void Renderer::destroyRenderFinishedSemaphores() {
         for(auto& semaphore : m_renderFinishedSemaphores) {
             if(semaphore != VK_NULL_HANDLE) {
-                vkDestroySemaphore(m_window.GetVulkan().GetDevice(), semaphore, nullptr);
+                vkDestroySemaphore(m_vulkan.GetDevice(), semaphore, nullptr);
                 semaphore = VK_NULL_HANDLE;
             }
         }
@@ -516,48 +445,14 @@ namespace cp_api {
                 continue;
             }
 
-            if(m_swapchainIsDirty.load() || m_surfaceLost.load()) {
-                m_renderEnabled.store(false);
-                vkDeviceWaitIdle(m_window.GetVulkan().GetDevice());
-
-                bool lost = m_surfaceLost.load();
-                if(lost) {
-                    m_window.GetVulkan().RecreateSurface();
-                    m_surfaceLost.store(false);
-                }
-
-                if(m_iconified.load()) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-                }
-
-                CP_LOG_INFO("Recreating swapchain...");
-
-                destroyCommandResources();
-                destroyRenderTargets();
-                destroyRenderFinishedSemaphores();
-
-                m_window.GetVulkan().RecreateSwapchain(m_window.IsVSyncEnabled() ? VK_PRESENT_MODE_FIFO_KHR : VK_PRESENT_MODE_MAILBOX_KHR, true);
-
-                createRenderTargets();
-                createCommandResources();
-                createRenderFinishedSemaphores();
-
-                cleanupImGui();
-                initImGui();
-
-                m_swapchainIsDirty.store(false);
-                m_skipAfterSwapchainRecreation.store(true);
-                m_renderEnabled.store(true);
-                
-                CP_LOG_INFO("Swapchain recreated.");
-            }
+            checkSwapchainAndRecreation();
 
             //store current frame
             auto& frame = m_frames[m_readFrameIndex];
 
             //acquire next swapchain image
             uint32_t imageIndex = 0;
-            VkResult result = vkAcquireNextImageKHR(m_window.GetVulkan().GetDevice(), m_window.GetVulkan().GetSwapchain().handler, UINT64_MAX, frame.imageAvailable, VK_NULL_HANDLE, &imageIndex);
+            VkResult result = m_vulkan.AcquireSwapchainNextImage(frame.imageAvailable, &imageIndex);
             if(result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR)
             {
                 m_swapchainIsDirty.store(true, std::memory_order_release);
@@ -576,16 +471,7 @@ namespace cp_api {
             }
 
             //wait until write finishes            
-            std::vector<VkSemaphore> semaphores = { m_timelineSem };
-            std::vector<uint64_t> values = { frame.recordValue };
-
-            VkSemaphoreWaitInfo waitInfo{ VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO };
-            waitInfo.semaphoreCount = (uint32_t)semaphores.size();
-            waitInfo.pSemaphores = semaphores.data();
-            waitInfo.pValues = values.data();
-            if(vkWaitSemaphores(m_window.GetVulkan().GetDevice(), &waitInfo, UINT64_MAX) != VK_SUCCESS) {
-                CP_LOG_THROW("Failed to wait timeline semaphore!");
-            }
+            m_vulkan.WaitTimelineSemaphores( { m_timelineSem }, { frame.recordValue });
 
             VkCommandBufferBeginInfo pbi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
             pbi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
@@ -594,16 +480,16 @@ namespace cp_api {
             }
             
             //set swapchain image to layout transfer dst
-            VkImage& swapchainImage = m_window.GetVulkan().GetSwapchain().images[imageIndex];
+            VkImage& swapchainImage = m_vulkan.GetSwapchain().images[imageIndex];
             
-            TransitionImageLayout(frame.primary, frame.renderTarget, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+            TransitionImageLayout(frame.primary, frame.renderTarget.color, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
             TransitionImageLayout(frame.primary, swapchainImage, VK_FORMAT_B8G8R8A8_UNORM, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-            TransitionImageLayout(frame.primary, frame.depthStencilTarget, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+            TransitionImageLayout(frame.primary, frame.renderTarget.depth, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
 
             // Configura attachment para limpeza
             VkRenderingAttachmentInfo colorAttachment{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
-            colorAttachment.imageView = frame.renderTarget.view;
-            colorAttachment.imageLayout = frame.renderTarget.layout;
+            colorAttachment.imageView = frame.renderTarget.color.view;
+            colorAttachment.imageLayout = frame.renderTarget.color.layout;
             colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
             colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
             
@@ -611,8 +497,8 @@ namespace cp_api {
             colorAttachment.clearValue = clearColor;
 
             VkRenderingAttachmentInfo depthAttachment{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
-            depthAttachment.imageView = frame.depthStencilTarget.view;
-            depthAttachment.imageLayout = frame.depthStencilTarget.layout;
+            depthAttachment.imageView = frame.renderTarget.depth.view;
+            depthAttachment.imageLayout = frame.renderTarget.depth.layout;
             depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
             depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
 
@@ -624,7 +510,7 @@ namespace cp_api {
             // Dynamic Rendering info
             VkRenderingInfo renderingInfo{VK_STRUCTURE_TYPE_RENDERING_INFO};
             renderingInfo.renderArea.offset = {0,0};
-            renderingInfo.renderArea.extent = m_window.GetVulkan().GetSwapchain().extent;
+            renderingInfo.renderArea.extent = m_vulkan.GetSwapchain().extent;
             renderingInfo.layerCount = 1;
             renderingInfo.colorAttachmentCount = 1;
             renderingInfo.pColorAttachments = &colorAttachment;
@@ -647,8 +533,8 @@ namespace cp_api {
             }
             vkCmdEndRendering(frame.primary);
 
-            TransitionImageLayout(frame.primary, frame.renderTarget, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-            CopyImage(frame.primary, frame.renderTarget.image, swapchainImage, m_window.GetVulkan().GetSwapchain().extent.width, m_window.GetVulkan().GetSwapchain().extent.height);
+            TransitionImageLayout(frame.primary, frame.renderTarget.color, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+            CopyImage(frame.primary, frame.renderTarget.color.image, swapchainImage, m_vulkan.GetSwapchain().extent.width, m_vulkan.GetSwapchain().extent.height);
             TransitionImageLayout(frame.primary, swapchainImage, VK_FORMAT_B8G8R8A8_UNORM, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
             
             if(vkEndCommandBuffer(frame.primary) != VK_SUCCESS) {
@@ -683,19 +569,19 @@ namespace cp_api {
             VkSemaphoreSubmitInfo signals[] = { signalTimeline, signalRenderFinished };
             submit2.pSignalSemaphoreInfos = signals;
 
-            if(vkQueueSubmit2(m_window.GetVulkan().GetQueue(QueueType::GRAPHICS), 1, &submit2, VK_NULL_HANDLE) != VK_SUCCESS) {
+            if(vkQueueSubmit2(m_vulkan.GetQueue(QueueType::GRAPHICS), 1, &submit2, VK_NULL_HANDLE) != VK_SUCCESS) {
                 CP_LOG_THROW("Failed to submit to graphics queue!");
             }
 
             // Apresenta
             VkPresentInfoKHR present{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
             present.swapchainCount = 1;
-            present.pSwapchains = &m_window.GetVulkan().GetSwapchain().handler;
+            present.pSwapchains = &m_vulkan.GetSwapchain().handler;
             present.pImageIndices = &imageIndex;
             present.waitSemaphoreCount = 1;
             present.pWaitSemaphores = &m_renderFinishedSemaphores[imageIndex];
             
-            result = vkQueuePresentKHR(m_window.GetVulkan().GetQueue(QueueType::PRESENT), &present);
+            result = vkQueuePresentKHR(m_vulkan.GetQueue(QueueType::PRESENT), &present);
 
             if(result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR)
             {
@@ -714,32 +600,105 @@ namespace cp_api {
         return m_renderEnabled.load(std::memory_order_acquire);
     }
 
-    VkResult Renderer::BeginCommandBuffer(  VkCommandBuffer cmdBuffer, 
-                                            const std::vector<VkFormat>& colorAttachments, 
-                                            const VkFormat& depthFormat, 
-                                            const VkSampleCountFlagBits& rasterizationSamples) {
+    void Renderer::checkSwapchainAndRecreation() {
+        bool lostSurface = m_surfaceLost.load();
 
-        VkCommandBufferInheritanceRenderingInfo inheritanceRenderingInfo{};
-        inheritanceRenderingInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_RENDERING_INFO;
-        inheritanceRenderingInfo.colorAttachmentCount = static_cast<uint32_t>(colorAttachments.size());
-        
-        VkFormat stencilFormat = (depthFormat == VK_FORMAT_D32_SFLOAT) ? VK_FORMAT_UNDEFINED : depthFormat;
+        if(m_swapchainIsDirty.load() || lostSurface) {
+            m_renderEnabled.store(false);
+            vkDeviceWaitIdle(m_vulkan.GetDevice());
 
-        inheritanceRenderingInfo.pColorAttachmentFormats = colorAttachments.data();
-        inheritanceRenderingInfo.depthAttachmentFormat = depthFormat;
-        inheritanceRenderingInfo.stencilAttachmentFormat = stencilFormat;
-        inheritanceRenderingInfo.rasterizationSamples = rasterizationSamples;
+            if(lostSurface) {
+                m_vulkan.RecreateSurface();
+                m_surfaceLost.store(false);
+            }
 
-        VkCommandBufferInheritanceInfo inh{VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO};
-        inh.pNext = &inheritanceRenderingInfo;
-        inh.renderPass = VK_NULL_HANDLE;
-        inh.subpass = 0;
-        inh.framebuffer = VK_NULL_HANDLE;
+            CP_LOG_INFO("Recreating swapchain...");
 
-        VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
-        bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT | VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT;
-        bi.pInheritanceInfo = &inh;
+            destroyCommandResources();
+            destroyRenderTargets();
+            destroyRenderFinishedSemaphores();
 
-        return vkBeginCommandBuffer(cmdBuffer, &bi);
+            m_vulkan.RecreateSwapchain(m_window.IsVSyncEnabled() ? VK_PRESENT_MODE_FIFO_KHR : VK_PRESENT_MODE_MAILBOX_KHR, true);
+
+            createRenderTargets();
+            createCommandResources();
+            createRenderFinishedSemaphores();
+
+            cleanupImGui();
+            initImGui();
+
+            m_swapchainIsDirty.store(false);
+            m_skipAfterSwapchainRecreation.store(true);
+            m_renderEnabled.store(true);
+            
+            CP_LOG_INFO("Swapchain recreated.");
+        }
+    }   
+
+    void Renderer::createRenderTargetImages(const uint32_t& width, const uint32_t& height, const VkFormat& format, RenderTarget* target) {
+
+        if(!target) return;
+
+        auto colorTarget = CreateImage(m_vulkan.GetDevice(), m_vulkan.GetVmaAllocator(),
+            width, height, format,
+            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+            VMA_MEMORY_USAGE_GPU_ONLY, 
+            VK_IMAGE_ASPECT_COLOR_BIT);
+
+        //depth stencil
+        VkFormat depthFormats[] = 
+        {
+            VK_FORMAT_D32_SFLOAT_S8_UINT,
+            VK_FORMAT_D24_UNORM_S8_UINT,
+            VK_FORMAT_D32_SFLOAT
+        };
+
+        VkFormat depthFormat = VK_FORMAT_UNDEFINED;
+        for (VkFormat dformat : depthFormats) 
+        {
+            VkFormatProperties props;
+            vkGetPhysicalDeviceFormatProperties(m_vulkan.GetPhysicalDevice(), dformat, &props);
+            if (props.optimalTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT) {
+                depthFormat = dformat;
+                break;
+            }
+        }
+
+        if(depthFormat == VK_FORMAT_UNDEFINED)
+            CP_LOG_THROW("Failed to choose a depth/stencil format");
+
+        VkImageAspectFlags depthAspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        if (depthFormat == VK_FORMAT_D32_SFLOAT_S8_UINT || depthFormat == VK_FORMAT_D24_UNORM_S8_UINT)
+        {
+            depthAspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
+        }
+
+        auto depthStencilTarget = CreateImage(m_vulkan.GetDevice(), m_vulkan.GetVmaAllocator(),
+            width, height, depthFormat,
+            VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+            VMA_MEMORY_USAGE_GPU_ONLY,
+            depthAspectMask);
+
+        std::function<std::string(VkFormat)> depthToStr = [](VkFormat format)
+        {
+            switch (format)
+            {
+            case VK_FORMAT_D32_SFLOAT_S8_UINT: return "VK_FORMAT_D32_SFLOAT_S8_UINT";
+            case VK_FORMAT_D24_UNORM_S8_UINT: return "VK_FORMAT_D24_UNORM_S8_UINT";
+            case VK_FORMAT_D32_SFLOAT: return "VK_FORMAT_D32_SFLOAT";
+            default: return "";
+            }
+        };
+
+        CP_LOG_INFO("[WINDOW] Created render target, depth format {}", depthToStr(depthFormat));
+
+        target->color = colorTarget;
+        target->depth = depthStencilTarget;
+
+        target->colorFormat = format;
+        target->depthFormat = depthFormat;
+
+        target->width = width;
+        target->height = height;
     }
 } // namespace cp_api

@@ -5,6 +5,16 @@
 #include "vkImage.hpp"
 
 namespace cp_api {
+    struct RenderTarget {
+        VulkanImage color;
+        VulkanImage depth;
+        VkFormat colorFormat;
+        VkFormat depthFormat;
+
+        uint32_t width;
+        uint32_t height;
+    };
+
     struct Frame
     {
         std::vector<VkCommandPool> cmdPool;
@@ -16,7 +26,6 @@ namespace cp_api {
         uint64_t recordValue = 0;
         uint64_t renderValue = 0;
 
-        VulkanImage renderTarget;
-        VulkanImage depthStencilTarget;
+        RenderTarget renderTarget;
     };
 } // namespace cp_api 
