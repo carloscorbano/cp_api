@@ -48,7 +48,9 @@ namespace cp_api {
             VkSwapchainKHR              handler = VK_NULL_HANDLE;
             std::vector<VkImage>        images;
             std::vector<VkImageView>    views;
-            VkFormat                    format;
+            VkFormat                    colorFormat;
+            VkFormat                    depthFormat;
+            VkFormat                    stencilFormat;
             VkExtent2D                  extent;
         };
 
@@ -79,9 +81,8 @@ namespace cp_api {
         VkResult BeginCommandBuffer(VkCommandBuffer cmdBuffer, 
                             const std::vector<VkFormat>& colorAttachments, 
                             const VkFormat& depthFormat, 
+                            const VkFormat& stencilFormat, 
                             const VkSampleCountFlagBits& rasterizationSamples = VK_SAMPLE_COUNT_1_BIT);
-
-        VkFormat GetStencilFormat(const VkFormat& depthFormat) const;
 
         VkResult AcquireSwapchainNextImage(VkSemaphore availableSemaphore, uint32_t* outIndex,  uint64_t timeout = UINT64_MAX);
 
@@ -119,6 +120,9 @@ namespace cp_api {
         VkSurfaceFormat2KHR chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormat2KHR>& availableFormats);
         VkPresentModeKHR chooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes, VkPresentModeKHR preferredMode);
         VkExtent2D chooseSwapExtent(const VkSurfaceCapabilities2KHR& capabilities);
+        VkFormat findSupportedFormat(const std::vector<VkFormat>& candidates, VkImageTiling tiling, VkFormatFeatureFlags features);
+        VkFormat findDepthFormat();
+        bool hasStencilFormat(const VkFormat& format) const;
 
         void logDeviceFeatures(
             const VkPhysicalDeviceFeatures2& supported,

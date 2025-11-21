@@ -2,7 +2,11 @@
 #include "cp_api/core/debug.hpp"
 
 namespace cp_api {
-    VulkanImage CreateImage(VkDevice device, 
+    VulkanImage::~VulkanImage() {
+        destroy();
+    }
+
+    VulkanImage VulkanImage::CreateImage(VkDevice device, 
         VmaAllocator allocator, 
         uint32_t width, 
         uint32_t height, 
@@ -31,10 +35,11 @@ namespace cp_api {
         VmaAllocationCreateInfo allocInfo{};
         allocInfo.usage = memoryUsage;
 
-        if (vmaCreateImage(allocator, &imageInfo, &allocInfo, &result.image, &result.allocation, nullptr) != VK_SUCCESS)
-        {
+        if (vmaCreateImage(allocator, &imageInfo, &allocInfo, &result.image, &result.allocation, nullptr) != VK_SUCCESS) {
             CP_LOG_THROW("Failed to create VMA image");
         }
+
+        vmaGetAllocationInfo(allocator, result.allocation, &result.allocationInfo);
 
         result.layout = VK_IMAGE_LAYOUT_UNDEFINED;
         result.format = imageInfo.format;
@@ -52,33 +57,22 @@ namespace cp_api {
         viewInfo.subresourceRange.baseArrayLayer = 0;
         viewInfo.subresourceRange.layerCount = 1;
 
-        if (vkCreateImageView(device, &viewInfo, nullptr, &result.view) != VK_SUCCESS)
-        {
+        if (vkCreateImageView(device, &viewInfo, nullptr, &result.view) != VK_SUCCESS) {
+            vmaDestroyImage(allocator, result.image, result.allocation);
+            result.image = VK_NULL_HANDLE;
+            result.allocation = VK_NULL_HANDLE;
             CP_LOG_THROW("Failed to create image view!");
         }
+
+
+        result.device = device;
+        result.alloc = allocator;
 
         return result;
 
     }
 
-
-    void DestroyImage(VkDevice device, VmaAllocator allocator, VulkanImage& image) {
-        if (image.image != VK_NULL_HANDLE)
-        {
-            vmaDestroyImage(allocator, image.image, image.allocation);
-            image.image = VK_NULL_HANDLE;
-            image.allocation = VK_NULL_HANDLE;
-        }
-
-        if(image.view != VK_NULL_HANDLE)
-        {
-            vkDestroyImageView(device, image.view, nullptr);
-        }
-
-        image = {};
-    }
-
-    bool FormatHasStencil(VkFormat format) {
+    bool VulkanImage::FormatHasStencil(VkFormat format) {
         switch (format)
         {
             case VK_FORMAT_D32_SFLOAT_S8_UINT:
@@ -89,7 +83,7 @@ namespace cp_api {
         }
     }
 
-    void TransitionImageLayout(VkCommandBuffer cmdBuffer, VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout) {
+    void VulkanImage::TransitionImageLayout(VkCommandBuffer cmdBuffer, VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout) {
         VkImageMemoryBarrier barrier{};
         barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
         barrier.oldLayout = oldLayout;
@@ -180,14 +174,14 @@ namespace cp_api {
         );
     }
 
-    void TransitionImageLayout(VkCommandBuffer cmdBuffer, VulkanImage& image, VkImageLayout newLayout) {
+    void VulkanImage::TransitionImageLayout(VkCommandBuffer cmdBuffer, VulkanImage& image, VkImageLayout newLayout) {
         if(image.layout == newLayout) return;
 
         TransitionImageLayout(cmdBuffer, image.image, image.format, image.layout, newLayout);
         image.layout = newLayout;
     }
 
-    void CopyImage(VkCommandBuffer commandBuffer, VkImage srcImage, VkImage dstImage, uint32_t width, uint32_t height, uint32_t mipLevel, uint32_t layerCount) {
+    void VulkanImage::CopyImage(VkCommandBuffer commandBuffer, VkImage srcImage, VkImage dstImage, uint32_t width, uint32_t height, uint32_t mipLevel, uint32_t layerCount) {
         VkImageCopy copyRegion{};
         copyRegion.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         copyRegion.srcSubresource.mipLevel = mipLevel;
@@ -214,5 +208,24 @@ namespace cp_api {
             dstImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
             1, &copyRegion
         );
+    }
+
+    void VulkanImage::destroy() {
+        if (device == VK_NULL_HANDLE || alloc == VK_NULL_HANDLE)
+            return;
+
+        if (view != VK_NULL_HANDLE) {
+            vkDestroyImageView(device, view, nullptr);
+            view = VK_NULL_HANDLE;
+        }
+
+        if (image != VK_NULL_HANDLE) {
+            vmaDestroyImage(alloc, image, allocation);
+            image = VK_NULL_HANDLE;
+            allocation = VK_NULL_HANDLE;
+        }
+
+        device = VK_NULL_HANDLE;
+        alloc = VK_NULL_HANDLE;
     }
 }

@@ -177,14 +177,15 @@ namespace cp_api {
         std::string Summary() const {
             std::string out;
             const auto& fd = m_frameCounter.GetFrameData();
-            out += "Frame " + std::to_string(fd.totalFrames) + " | FPS " +
+            out += "FPS " +
                    std::to_string(fd.fpsInfo.current) +
                    " (avg " + std::to_string(fd.fpsInfo.average) +
                    ", min " + std::to_string(fd.fpsInfo.min) +
                    ", max " + std::to_string(fd.fpsInfo.max) + ")\n";
 
+            out += "Samplers:\n";
             for (const auto& [name, sampler] : m_timerSamplers) {
-                out += "  " + name + " : " +
+                out += "   *" + name + " : " +
                        std::to_string(sampler.GetAverage()) + " ms" +
                        " (min " + std::to_string(sampler.GetMin()) +
                        ", max " + std::to_string(sampler.GetMax()) + ")\n";

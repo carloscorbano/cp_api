@@ -91,14 +91,12 @@ namespace cp_api {
     VkResult Vulkan::BeginCommandBuffer(  VkCommandBuffer cmdBuffer, 
                                             const std::vector<VkFormat>& colorAttachments, 
                                             const VkFormat& depthFormat, 
+                                            const VkFormat& stencilFormat,
                                             const VkSampleCountFlagBits& rasterizationSamples) {
 
         VkCommandBufferInheritanceRenderingInfo inheritanceRenderingInfo{};
         inheritanceRenderingInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_RENDERING_INFO;
         inheritanceRenderingInfo.colorAttachmentCount = static_cast<uint32_t>(colorAttachments.size());
-        
-        VkFormat stencilFormat = (depthFormat == VK_FORMAT_D32_SFLOAT) ? VK_FORMAT_UNDEFINED : depthFormat;
-
         inheritanceRenderingInfo.pColorAttachmentFormats = colorAttachments.data();
         inheritanceRenderingInfo.depthAttachmentFormat = depthFormat;
         inheritanceRenderingInfo.stencilAttachmentFormat = stencilFormat;
@@ -115,10 +113,6 @@ namespace cp_api {
         bi.pInheritanceInfo = &inh;
 
         return vkBeginCommandBuffer(cmdBuffer, &bi);
-    }
-
-    VkFormat Vulkan::GetStencilFormat(const VkFormat& depthFormat) const {
-        return (depthFormat == VK_FORMAT_D24_UNORM_S8_UINT || depthFormat == VK_FORMAT_D32_SFLOAT_S8_UINT) ? depthFormat : VK_FORMAT_UNDEFINED; 
     }
 
     VkResult Vulkan::AcquireSwapchainNextImage(VkSemaphore availableSemaphore, uint32_t* outIndex,  uint64_t timeout) {
@@ -558,7 +552,9 @@ namespace cp_api {
         sc.images.resize(imageCount);
         vkGetSwapchainImagesKHR(m_device, sc.handler, &imageCount, sc.images.data());
 
-        sc.format = format.surfaceFormat.format;
+        sc.colorFormat = format.surfaceFormat.format;
+        sc.depthFormat = findDepthFormat();
+        sc.stencilFormat = hasStencilFormat(sc.depthFormat) ? sc.depthFormat : VK_FORMAT_UNDEFINED;
         sc.extent = extent;
 
         sc.views.resize(sc.images.size());
@@ -567,7 +563,7 @@ namespace cp_api {
             viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
             viewInfo.image = sc.images[i];
             viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-            viewInfo.format = sc.format;
+            viewInfo.format = sc.colorFormat;
             viewInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
             viewInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
             viewInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
@@ -890,6 +886,34 @@ namespace cp_api {
 
             return actualExtent;
         }
+    }
+
+    VkFormat Vulkan::findSupportedFormat(const std::vector<VkFormat>& candidates, VkImageTiling tiling, VkFormatFeatureFlags features) {
+        for (VkFormat format : candidates) {
+            VkFormatProperties props;
+            vkGetPhysicalDeviceFormatProperties(m_physDevice, format, &props);
+
+            if (tiling == VK_IMAGE_TILING_LINEAR && (props.linearTilingFeatures & features) == features) {
+                return format;
+            } else if (tiling == VK_IMAGE_TILING_OPTIMAL && (props.optimalTilingFeatures & features) == features) {
+                return format;
+            }
+        }
+
+        CP_LOG_THROW("Failed to find suitable format!");
+        return VK_FORMAT_UNDEFINED;
+    }
+
+    VkFormat Vulkan::findDepthFormat() {
+        return findSupportedFormat(
+            {VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT},
+            VK_IMAGE_TILING_OPTIMAL,
+            VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT
+        );
+    }
+
+    bool Vulkan::hasStencilFormat(const VkFormat& format) const {
+        return format == VK_FORMAT_D32_SFLOAT_S8_UINT || format == VK_FORMAT_D24_UNORM_S8_UINT;
     }
 
     void Vulkan::logDeviceFeatures(

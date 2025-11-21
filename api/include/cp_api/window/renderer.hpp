@@ -1,75 +1,87 @@
 #pragma once
 
 #include <thread>
-#include <atomic> 
+#include <atomic>
 #include <chrono>
 #include "glfw.inc.hpp"
 #include "frame.hpp"
 
+#include <entt/entt.hpp>
+
 namespace cp_api {
+    class Window;
     class World;
     class ThreadPool;
-    class Window;
     class Vulkan;
+
     class Renderer {
-        const uint32_t SIMULTANEOS_WORKERS_RECORDING_COUNT = 4;
     public:
-        Renderer(Window& window);
+        Renderer(Window& window, World& world, ThreadPool& threadPool);
         ~Renderer();
 
-        void ProcessWorld(World& world, ThreadPool& threadPool);
+        Renderer(const Renderer&) = delete;
+        Renderer& operator=(const Renderer&) = delete;
+        Renderer(Renderer&&) = delete;
+        Renderer& operator=(Renderer&&) = delete;
+
+        void Render();
+        
     private:
+        void submitThreadWork();
+
+        //events and callbacks
         void setupEventListeners();
+        void onCameraCreationCallback(entt::registry& reg, entt::entity e);
+        void onCameraDestructionCallback(entt::registry& reg, entt::entity e);
+
+        //initialization methods
+        void createGlobalDescriptorPool();
+        void destroyGlobalDescriptorPool();
 
         void createFrames();
         void destroyFrames();
 
-        void createRenderTargets();
-        void destroyRenderTargets();
-
-        void createCommandResources();
-        void destroyCommandResources();
-
-        void createTransferResources();
-        void destroyTransferResources();
+        void createMainCamera();
+        void destroyMainCamera();
 
         void initImGui();
-        void cleanupImGui();
+        void destroyImGui();
 
         void createRenderFinishedSemaphores();
         void destroyRenderFinishedSemaphores();
 
-        void renderThreadWork();
+        void createCommandResources();
+        void destroyCommandResources();
 
-        bool isRenderEnabled() const;
-
-
-    private:
-        void checkSwapchainAndRecreation();
-
-        void createRenderTargetImages(const uint32_t& width, const uint32_t& height, const VkFormat& format, RenderTarget* target);
+        bool isRenderEnabled() const { return m_renderEnabled.load(std::memory_order_acquire); }
 
     private:
+        //refs cache
         Window& m_window;
         Vulkan& m_vulkan;
+        World& m_world;
+        ThreadPool& m_threadPool;        
 
-        std::thread m_renderThread;
+        //controller vars
         std::atomic<bool> m_renderEnabled { true };
         std::atomic<bool> m_swapchainIsDirty { false };
         std::atomic<bool> m_skipAfterSwapchainRecreation { false };
         std::atomic<bool> m_surfaceLost { false };
-
-        std::vector<Frame> m_frames;
+        std::vector<VkSemaphore> m_renderFinishedSemaphores;
         VkSemaphore m_timelineSem = VK_NULL_HANDLE;
 
         uint32_t m_writeFrameIndex = 0;
         uint32_t m_readFrameIndex = 0;
 
-        VkCommandPool m_transferCmdPool = VK_NULL_HANDLE;
-        VkCommandBuffer m_transferCmdBuffer = VK_NULL_HANDLE;
+        std::vector<Frame> m_frames;
 
-        std::vector<VkSemaphore> m_renderFinishedSemaphores;
+        //render thread
+        std::thread m_renderThreadWorker;
 
-        VkDescriptorPool m_imguiPool;
+        //Descriptor pool
+        VkDescriptorPool g_descriptorPool = VK_NULL_HANDLE;
+
+        uint32_t m_mainCameraUID = 0;
+        RenderTarget m_mainCameraRenderTarget;
     };
 } // namespace cp_api

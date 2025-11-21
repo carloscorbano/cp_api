@@ -1,7 +1,7 @@
 #include "cp_api/window/vkBuffer.hpp"
 #include "cp_api/core/debug.hpp"
 
-cp_api::VulkanBuffer cp_api::CreateBuffer(VmaAllocator allocator, VkDeviceSize size, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage) {
+cp_api::VulkanBuffer cp_api::VulkanBuffer::CreateBuffer(VmaAllocator allocator, VkDeviceSize size, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage) {
     cp_api::VulkanBuffer result;
     VkBufferCreateInfo bufferInfo{};
     bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -23,7 +23,7 @@ cp_api::VulkanBuffer cp_api::CreateBuffer(VmaAllocator allocator, VkDeviceSize s
     return result;
 }
 
-void cp_api::DestroyBuffer(VmaAllocator allocator, cp_api::VulkanBuffer& buffer) {
+void cp_api::VulkanBuffer::DestroyBuffer(VmaAllocator allocator, cp_api::VulkanBuffer& buffer) {
     if (buffer.buffer != VK_NULL_HANDLE)
     {
         vmaDestroyBuffer(allocator, buffer.buffer, buffer.allocation);
@@ -34,7 +34,7 @@ void cp_api::DestroyBuffer(VmaAllocator allocator, cp_api::VulkanBuffer& buffer)
     }
 }
 
-void cp_api::CopyDataToGPU(VkDevice device, VmaAllocator allocator, VkCommandPool commandPool, VkQueue queue, void* srcData, cp_api::VulkanBuffer& dstBuffer, VkDeviceSize size) {
+void cp_api::VulkanBuffer::CopyDataToGPU(VkDevice device, VmaAllocator allocator, VkCommandPool commandPool, VkQueue queue, void* srcData, cp_api::VulkanBuffer& dstBuffer, VkDeviceSize size) {
     if (!srcData || size == 0 || dstBuffer.buffer == VK_NULL_HANDLE)
         throw std::runtime_error("Invalid parameters for CopyDataToGPU");
 

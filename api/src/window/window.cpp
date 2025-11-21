@@ -11,7 +11,7 @@ namespace cp_api {
     int Window::s_glfwInitCount = 0;
     std::vector<Window*> Window::s_windows;
 
-    Window::Window(int width, int height, const char* title) {
+    Window::Window(int width, int height, const char* title, World& world, ThreadPool& threadPool) {
         if (s_glfwInitCount++ == 0) {
             if (!glfwInit()) {
                 CP_LOG_ERROR("Failed to initialize GLFW");
@@ -48,7 +48,7 @@ namespace cp_api {
 
         m_input = std::make_unique<InputManager>(m_wndHandle);
         m_vulkan = std::make_unique<Vulkan>(m_wndHandle);
-        m_renderer = std::make_unique<Renderer>(*this);
+        m_renderer = std::make_unique<Renderer>(*this, world, threadPool);
 
         GetEventDispatcher().Subscribe<onWindowResizeEvent>([this](const onWindowResizeEvent& event) {
             m_isDragging.store(true);
@@ -106,8 +106,8 @@ namespace cp_api {
         }
     }
 
-    void Window::ProcessWorld(World& world, ThreadPool& threadPool) {
-        m_renderer->ProcessWorld(world, threadPool);
+    void Window::Render() {
+        m_renderer->Render();
     }
 
     // ----------------- Window Mode -----------------

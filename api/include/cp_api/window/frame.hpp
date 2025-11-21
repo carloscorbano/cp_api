@@ -2,30 +2,29 @@
 
 #include <vector>
 #include "glfw.inc.hpp"
-#include "vkImage.hpp"
+#include "renderTarget.hpp"
+#include <array>
 
 namespace cp_api {
-    struct RenderTarget {
-        VulkanImage color;
-        VulkanImage depth;
-        VkFormat colorFormat;
-        VkFormat depthFormat;
-
-        uint32_t width;
-        uint32_t height;
+    struct WorkerCmdData {
+        VkCommandPool pool = VK_NULL_HANDLE;
+        VkCommandBuffer cb = VK_NULL_HANDLE;
     };
+
+    constexpr uint16_t MAX_WORKERS_PER_FRAME = 4;
 
     struct Frame
     {
-        std::vector<VkCommandPool> cmdPool;
-        std::vector<VkCommandBuffer> secondaries;
+        VkCommandPool primaryCmdPool = VK_NULL_HANDLE;
         VkCommandBuffer primary = VK_NULL_HANDLE;
-
         VkSemaphore imageAvailable = VK_NULL_HANDLE;
 
         uint64_t recordValue = 0;
         uint64_t renderValue = 0;
 
-        RenderTarget renderTarget;
+        std::array<WorkerCmdData, MAX_WORKERS_PER_FRAME> workers;
+
+        VkCommandPool imguiCmdPool;
+        VkCommandBuffer imguiCmdBuffer;
     };
 } // namespace cp_api 

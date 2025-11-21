@@ -71,7 +71,7 @@ namespace cp_api {
     class ThreadPool;
     class Window {
     public:
-        Window(int width, int height, const char* title);
+        Window(int width, int height, const char* title, World& world, ThreadPool& threadPool);
         ~Window();
 
         Window(const Window&) = delete;
@@ -87,7 +87,7 @@ namespace cp_api {
         bool ShouldClose() const;
         void Update();
 
-        void ProcessWorld(World& world, ThreadPool& threadPool);
+        void Render();
 
         // Window state
         int GetWidth() const;
