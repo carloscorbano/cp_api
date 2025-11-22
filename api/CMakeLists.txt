@@ -28,6 +28,7 @@ add_library(cp_api STATIC
     src/window/imgui.inc.cpp
     src/window/renderer.cpp
     src/window/renderTarget.cpp
+    src/window/renderTargetManager.cpp
     
     src/containers/ntree.cpp
     src/containers/spatialTree.cpp

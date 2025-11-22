@@ -1,7 +1,7 @@
 #include "cp_api/window/renderer.hpp"
 #include "cp_api/window/window.hpp"
 #include "cp_api/window/vulkan.hpp"
-
+#include "cp_api/window/renderTargetManager.hpp"
 #include "cp_api/core/threadPool.hpp"
 #include "cp_api/core/debug.hpp"
 
@@ -21,10 +21,13 @@ namespace cp_api {
         //initialization methods
         createGlobalDescriptorPool();
         createFrames();
-        createMainCamera();
         createRenderFinishedSemaphores();
         createCommandResources();
         initImGui();
+
+        m_rtManager = std::make_unique<RenderTargetManager>();
+        m_rtManager->Init(&m_vulkan);
+        createMainCamera();
 
         m_renderThreadWorker = std::thread([this]() { submitThreadWork(); });
         CP_LOG_SUCCESS("Successfully created renderer object!");
@@ -50,11 +53,15 @@ namespace cp_api {
     void Renderer::Render() {
         if(!isRenderEnabled()) return;
 
+        m_rtManager->BeginFrame(m_frameCounter);
+
         //cache
         auto& device = m_vulkan.GetDevice();
         auto& frame = m_frames[m_writeFrameIndex];
         auto& swp = m_vulkan.GetSwapchain();
-       
+        
+        
+
         //-----------------------------------------------------------------
         // RECORD COMMANDS
         //-----------------------------------------------------------------
@@ -143,6 +150,7 @@ namespace cp_api {
 
         //advance
         m_writeFrameIndex = (m_writeFrameIndex + 1) % (uint32_t)m_frames.size();
+        m_frameCounter++;
     }
 
     void Renderer::submitThreadWork() {
@@ -170,18 +178,22 @@ namespace cp_api {
 
                 destroyCommandResources();
                 destroyRenderFinishedSemaphores();
-                destroyImGui();
-                //TODO: destroy render targets HERE!
 
                 m_vulkan.RecreateSwapchain(m_window.IsVSyncEnabled() ? VK_PRESENT_MODE_FIFO_KHR : VK_PRESENT_MODE_MAILBOX_KHR, true);
+                auto& swp = m_vulkan.GetSwapchain();
+                const uint32_t w = swp.extent.width;
+                const uint32_t h = swp.extent.height;
+                
+                m_rtManager->InvalidateByResolution(w, h);
+
+                auto result = m_world.GetRegistry().try_get<CameraComponent>((entt::entity)m_mainCameraUID);
+                if(result) {
+                    result->width = w;
+                    result->height = h;
+                }
 
                 createCommandResources();
                 createRenderFinishedSemaphores();
-
-                //TODO: recreate render targets HERE!
-                m_mainCameraRenderTarget.Recreate(m_vulkan.GetDevice(), m_vulkan.GetVmaAllocator(), m_vulkan.GetSwapchain().extent.width, m_vulkan.GetSwapchain().extent.height);                
-                
-                initImGui();
 
                 m_swapchainIsDirty.store(false);
                 m_skipAfterSwapchainRecreation.store(true);
@@ -226,71 +238,86 @@ namespace cp_api {
             //set swapchain image to layout transfer dst
             auto& swp = m_vulkan.GetSwapchain();
 
-            //transition images
-            VulkanImage::TransitionImageLayout(frame.primary, m_mainCameraRenderTarget.GetColorImage(), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-            VulkanImage::TransitionImageLayout(frame.primary, swp.images[imageIndex], swp.colorFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-            VulkanImage::TransitionImageLayout(frame.primary, m_mainCameraRenderTarget.GetDepthImage(), VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+            // --- Begin: render each camera to its own render target ---
+            auto& reg = m_world.GetRegistry();
+            auto camView = reg.view<CameraComponent, TransformComponent>();
 
-            // Configura attachment para limpeza
-            VkRenderingAttachmentInfo colorAttachment{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
-            colorAttachment.imageView = m_mainCameraRenderTarget.GetColorImage().GetView();
-            colorAttachment.imageLayout = m_mainCameraRenderTarget.GetColorImage().GetLayout();
-            colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-            colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-            
-            VkClearValue clearColor = { {0.0f, 0.2f, 0.3f, 1.0f} };
-            colorAttachment.clearValue = clearColor;
+            for (auto e : camView) {
+                auto& camComp = camView.get<CameraComponent>(e);
+                uint32_t camW = camComp.width;
+                uint32_t camH = camComp.height;
 
-            VkRenderingAttachmentInfo depthAttachment{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
-            depthAttachment.imageView = m_mainCameraRenderTarget.GetDepthImage().GetView();
-            depthAttachment.imageLayout = m_mainCameraRenderTarget.GetDepthImage().GetLayout();
-            depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-            depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+                // Acquire or recreate RT for this camera
+                RenderTarget* camRT = m_rtManager->Acquire((uint32_t)e, camW, camH, swp.colorFormat, swp.depthFormat);
 
-            VkClearValue clearDepth{};
-            clearDepth.depthStencil.depth = 1.0f;
-            clearDepth.depthStencil.stencil = 0;
-            depthAttachment.clearValue = clearDepth;
+                auto& colorImage = camRT->GetColorImage();
+                auto& depthImage = camRT->GetDepthImage();
 
-            // Dynamic Rendering info
-            VkRenderingInfo renderingInfo{VK_STRUCTURE_TYPE_RENDERING_INFO};
-            renderingInfo.renderArea.offset = {0,0};
-            renderingInfo.renderArea.extent = swp.extent;
-            renderingInfo.layerCount = 1;
-            renderingInfo.colorAttachmentCount = 1;
-            renderingInfo.pColorAttachments = &colorAttachment;
-            renderingInfo.pDepthAttachment = &depthAttachment;
-            renderingInfo.pStencilAttachment = &depthAttachment;
-            
-            renderingInfo.flags = VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT; // IMPORTANTE
+                // ensure layouts (reusing your helpers)
+                VulkanImage::TransitionImageLayout(frame.primary, colorImage, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+                VulkanImage::TransitionImageLayout(frame.primary, depthImage, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
 
-            vkCmdBeginRendering(frame.primary, &renderingInfo);
-            {
-                // Executa secondary command buffer
-                if(m_skipAfterSwapchainRecreation.load())
+                // Prepare attachments (clear values)
+                VkRenderingAttachmentInfo colorAttachment{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
+                colorAttachment.imageView = colorImage.GetView();
+                colorAttachment.imageLayout = colorImage.GetLayout();
+                colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+                colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+                VkClearValue clearColor = { {0.0f, 0.2f, 0.3f, 1.0f} };
+                colorAttachment.clearValue = clearColor;
+
+                VkRenderingAttachmentInfo depthAttachment{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
+                depthAttachment.imageView = depthImage.GetView();
+                depthAttachment.imageLayout = depthImage.GetLayout();
+                depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+                depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+                VkClearValue clearDepth{};
+                clearDepth.depthStencil.depth = 1.0f;
+                clearDepth.depthStencil.stencil = 0;
+                depthAttachment.clearValue = clearDepth;
+
+                VkRenderingInfo renderingInfo{VK_STRUCTURE_TYPE_RENDERING_INFO};
+                renderingInfo.renderArea.offset = {0,0};
+                renderingInfo.renderArea.extent = { camW, camH };
+                renderingInfo.layerCount = 1;
+                renderingInfo.colorAttachmentCount = 1;
+                renderingInfo.pColorAttachments = &colorAttachment;
+                renderingInfo.pDepthAttachment = &depthAttachment;
+                renderingInfo.pStencilAttachment = &depthAttachment;
+                renderingInfo.flags = VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT;
+
+                bool isMainCamera = (uint32_t)e == m_mainCameraUID;
+
+                vkCmdBeginRendering(frame.primary, &renderingInfo);
                 {
-                    m_skipAfterSwapchainRecreation.store(false);
-                }
-                else
-                {
-
-                    std::vector<VkCommandBuffer> cmds;
-                    for(auto& worker : frame.workers) {
-                        cmds.push_back(worker.cb);
+                    // NOTE:
+                    // - Atualmente você grava worker.cb de forma genérica; se no futuro cada worker
+                    //   gravar comandos específicos por câmera, aqui você deve executar apenas
+                    //   os command buffers correspondentes a esta câmera.
+                    //
+                    // For now, execute the worker secondaries as before (they are scene draws).
+                    if(m_skipAfterSwapchainRecreation.load()) {
+                        m_skipAfterSwapchainRecreation.store(false);
+                    } else {
+                        std::vector<VkCommandBuffer> cmds;
+                        for(auto& worker : frame.workers) {
+                            cmds.push_back(worker.cb);
+                        }
+                        // If you have per-camera secondary buffers in future, only push the ones for this camera.
+                        if (&frame.imguiCmdBuffer != VK_NULL_HANDLE && isMainCamera) cmds.push_back(frame.imguiCmdBuffer);
+                        vkCmdExecuteCommands(frame.primary, (uint32_t)cmds.size(), cmds.data());
                     }
+                }
+                vkCmdEndRendering(frame.primary);
 
-                    cmds.push_back(frame.imguiCmdBuffer);
-
-                    vkCmdExecuteCommands(frame.primary, (uint32_t)cmds.size(), cmds.data());
+                if (isMainCamera) {
+                    VulkanImage::TransitionImageLayout(frame.primary, colorImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+                    VulkanImage::TransitionImageLayout(frame.primary, swp.images[imageIndex], swp.colorFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+                    VulkanImage::CopyImage(frame.primary, colorImage.GetImage(), swp.images[imageIndex], colorImage.GetExtent().width, colorImage.GetExtent().height);
+                    VulkanImage::TransitionImageLayout(frame.primary, swp.images[imageIndex], swp.colorFormat, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
                 }
             }
-            vkCmdEndRendering(frame.primary);
-
-            //copy img
-            //transition swp image
-            VulkanImage::TransitionImageLayout(frame.primary, m_mainCameraRenderTarget.GetColorImage(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-            VulkanImage::CopyImage(frame.primary, m_mainCameraRenderTarget.GetColorImage().GetImage(), swp.images[imageIndex], m_mainCameraRenderTarget.GetColorImage().GetExtent().width, m_mainCameraRenderTarget.GetColorImage().GetExtent().height);
-            VulkanImage::TransitionImageLayout(frame.primary, swp.images[imageIndex], swp.colorFormat, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+            // --- End: render each camera ---
 
             if(vkEndCommandBuffer(frame.primary) != VK_SUCCESS) {
                 CP_LOG_THROW("Failed to end primary command buffer!");
@@ -348,6 +375,9 @@ namespace cp_api {
 
             //advance
             m_readFrameIndex = (m_readFrameIndex + 1) % (uint32_t)m_frames.size();
+
+            //cleanup unused render targets.
+            m_rtManager->PurgeUnused();
         }
     }
 
@@ -366,23 +396,25 @@ namespace cp_api {
             m_swapchainIsDirty.store(true);
         });
 
-        m_world.GetRegistry().on_construct<CameraComponent>().connect<&Renderer::onCameraCreationCallback>(this);
-        m_world.GetRegistry().on_destroy<CameraComponent>().connect<&Renderer::onCameraDestructionCallback>(this);
+        auto& reg = m_world.GetRegistry();
+        reg.on_construct<CameraComponent>().connect<&Renderer::onCameraCreationCallback>(this);
+        reg.on_destroy<CameraComponent>().connect<&Renderer::onCameraDestructionCallback>(this);
     }
 
-    void Renderer::onCameraCreationCallback(entt::registry& reg, entt::entity e) { 
-        //TODO: create render target!
-        uint32_t uid = (uint32_t)e;
+    void Renderer::onCameraCreationCallback(entt::registry& reg, entt::entity e) {
+        // Pre-cria render target para a nova câmera (evita stall na primeira render)
+        // Assumimos que CameraComponent possui width e height (como no seu createMainCamera).
+        if (!reg.valid(e)) return;
 
-        //TODO: cria o render target correspondente a essa câmera        
-        // registra
-
-        CP_LOG_DEBUG("Created RenderTarget for camera {}", uid);        
+        auto &cam = reg.get<CameraComponent>(e);
+        // usa formatos do swapchain por padrão; se câmera tiver formatos próprios, adapte.
+        auto& swp = m_vulkan.GetSwapchain();
+        m_rtManager->Acquire((uint32_t)e, cam.width, cam.height, swp.colorFormat, swp.depthFormat);
     }
 
-    void Renderer::onCameraDestructionCallback(entt::registry& reg, entt::entity e) { 
-        //TODO: mark render target to destruction
-        uint32_t uid = (uint32_t)e;
+    void Renderer::onCameraDestructionCallback(entt::registry& reg, entt::entity e) {
+        // Remove o RT associado à câmera destruída
+        m_rtManager->Release((uint32_t)e);
     }
 #pragma endregion EVENTS_AND_CALLBACKS
 
@@ -500,19 +532,11 @@ namespace cp_api {
         reg.emplace<DontDestroyOnLoad>(mainCameraEntity);
 
         m_mainCameraUID = (uint32_t)mainCameraEntity;
-        m_mainCameraRenderTarget.Create(m_vulkan.GetDevice(), 
-                                        m_vulkan.GetVmaAllocator(), 
-                                        swp.extent.width, 
-                                        swp.extent.height, 
-                                        swp.colorFormat, 
-                                        swp.depthFormat);
     }
 
     void Renderer::destroyMainCamera() {
         m_world.GetRegistry().destroy((entt::entity)m_mainCameraUID);
-        m_mainCameraRenderTarget = RenderTarget{};
         m_mainCameraUID = 0;
-
     }
 
     void Renderer::initImGui() {

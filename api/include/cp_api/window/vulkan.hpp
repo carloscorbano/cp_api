@@ -73,8 +73,8 @@ namespace cp_api {
         VmaAllocator GetVmaAllocator() { return m_vmaAllocator; }
         QueueFamilyIndices GetQueueFamilyIndices() const { return m_familyIndices; }
 
-        VkCommandBuffer BeginSingleTimeCommands(VkCommandPool commandPool);
-        void EndSingleTimeCommands(VkCommandPool commandPool, VkCommandBuffer commandBuffer);
+        VkCommandBuffer BeginSingleTimeCommands();
+        void EndSingleTimeCommands(VkCommandBuffer commandBuffer);
 
         void RecreateSurface();
 
@@ -109,6 +109,9 @@ namespace cp_api {
 
         Swapchain createSwapchain(VkPresentModeKHR preferredMode, Swapchain* oldSwapchain = nullptr);
         void destroySwapchain(Swapchain* swapchain);
+
+        void createSingleTimeCommandsPool();
+        void destroySingleTimeCommandsPool();
 
         std::vector<const char*> getGlfwRequiredExtensions();
         bool checkValidationLayerSupport();
@@ -151,5 +154,6 @@ namespace cp_api {
 
         Swapchain                   m_swapchain;
         VmaAllocator                m_vmaAllocator = VK_NULL_HANDLE;
+        VkCommandPool               m_singleTimeCmdPool = VK_NULL_HANDLE;
     };
 } // namespace cp_api

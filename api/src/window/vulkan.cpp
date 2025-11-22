@@ -18,9 +18,11 @@ namespace cp_api {
         createLogicalDevice();
         createVmaAllocator();
         m_swapchain = createSwapchain(VK_PRESENT_MODE_FIFO_KHR);
+        createSingleTimeCommandsPool();
     }
 
     Vulkan::~Vulkan() {
+        destroySingleTimeCommandsPool();
         destroySwapchain(&m_swapchain);
         destroyVmaAllocator();
         destroyLogicalDevice();
@@ -49,11 +51,11 @@ namespace cp_api {
         destroySwapchain(&oldSwapchain);
     }
 
-    VkCommandBuffer Vulkan::BeginSingleTimeCommands(VkCommandPool commandPool) {
+    VkCommandBuffer Vulkan::BeginSingleTimeCommands() {
         VkCommandBufferAllocateInfo allocInfo{};
         allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
         allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-        allocInfo.commandPool = commandPool;
+        allocInfo.commandPool = m_singleTimeCmdPool;
         allocInfo.commandBufferCount = 1;
 
         VkCommandBuffer commandBuffer;
@@ -63,23 +65,37 @@ namespace cp_api {
         beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
         beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
-        vkBeginCommandBuffer(commandBuffer, &beginInfo);
+        if(vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS) {
+            CP_LOG_THROW("Failed to begin single time command!");
+        } 
 
         return commandBuffer;
     }
 
-    void Vulkan::EndSingleTimeCommands(VkCommandPool commandPool, VkCommandBuffer commandBuffer) {
-        vkEndCommandBuffer(commandBuffer);
+    void Vulkan::EndSingleTimeCommands(VkCommandBuffer commandBuffer) {
+        if(vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) {
+            CP_LOG_THROW("Failed to end single time command!");
+        }
 
         VkSubmitInfo submitInfo{};
         submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         submitInfo.commandBufferCount = 1;
         submitInfo.pCommandBuffers = &commandBuffer;
 
-        vkQueueSubmit(GetQueue(QueueType::TRANSFER), 1, &submitInfo, VK_NULL_HANDLE);
-        vkQueueWaitIdle(GetQueue(QueueType::TRANSFER));
+        VkFenceCreateInfo fci{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+        VkFence fence = VK_NULL_HANDLE;
+        if(vkCreateFence(GetDevice(), &fci, nullptr, &fence) != VK_SUCCESS) {
+            CP_LOG_THROW("Failed to create fence for single time commands!");
+        }
 
-        vkFreeCommandBuffers(GetDevice(), commandPool, 1, &commandBuffer);
+        if(vkQueueSubmit(GetQueue(QueueType::GRAPHICS), 1, &submitInfo, fence) != VK_SUCCESS) {
+            CP_LOG_ERROR("Failed to submit RT initial transition");
+        } else { 
+            vkWaitForFences(GetDevice(), 1, &fence, VK_TRUE, UINT64_MAX);
+        }
+
+        vkDestroyFence(GetDevice(), fence, nullptr);
+        vkFreeCommandBuffers(GetDevice(), m_singleTimeCmdPool, 1, &commandBuffer);
     }
 
     void Vulkan::RecreateSurface() {
@@ -592,6 +608,24 @@ namespace cp_api {
 
             vkDestroySwapchainKHR(m_device, swapchain->handler, nullptr);
             swapchain->handler = VK_NULL_HANDLE;
+        }
+    }
+
+    void Vulkan::createSingleTimeCommandsPool() {
+        VkCommandPoolCreateInfo cmdPoolInfo{};
+        cmdPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+        cmdPoolInfo.pNext = nullptr;
+        cmdPoolInfo.queueFamilyIndex = GetQueueFamilyIndices().graphicsFamily.value();
+        
+        if(vkCreateCommandPool(GetDevice(), &cmdPoolInfo, nullptr, &m_singleTimeCmdPool) != VK_SUCCESS) {
+            CP_LOG_THROW("Failed to create single time commands pool!");
+        }
+    }
+
+    void Vulkan::destroySingleTimeCommandsPool() {
+        if(m_singleTimeCmdPool != VK_NULL_HANDLE) {
+            vkDestroyCommandPool(GetDevice(), m_singleTimeCmdPool, nullptr);
+            m_singleTimeCmdPool = VK_NULL_HANDLE;
         }
     }
 

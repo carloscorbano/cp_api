@@ -13,6 +13,7 @@ namespace cp_api {
     class World;
     class ThreadPool;
     class Vulkan;
+    class RenderTargetManager;
 
     class Renderer {
     public:
@@ -60,7 +61,9 @@ namespace cp_api {
         Window& m_window;
         Vulkan& m_vulkan;
         World& m_world;
-        ThreadPool& m_threadPool;        
+        ThreadPool& m_threadPool;    
+        
+        std::unique_ptr<RenderTargetManager> m_rtManager;
 
         //controller vars
         std::atomic<bool> m_renderEnabled { true };
@@ -82,6 +85,6 @@ namespace cp_api {
         VkDescriptorPool g_descriptorPool = VK_NULL_HANDLE;
 
         uint32_t m_mainCameraUID = 0;
-        RenderTarget m_mainCameraRenderTarget;
+        uint64_t m_frameCounter = 0;
     };
 } // namespace cp_api
