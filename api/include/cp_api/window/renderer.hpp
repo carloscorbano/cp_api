@@ -14,6 +14,7 @@ namespace cp_api {
     class ThreadPool;
     class Vulkan;
     class RenderTargetManager;
+    struct CameraComponent;
 
     class Renderer {
     public:
@@ -29,6 +30,7 @@ namespace cp_api {
         
     private:
         void submitThreadWork();
+        VkResult recordWorkerCommands(const uint32_t& frameIndex, const entt::entity& camera, const uint32_t& workerIndex);
 
         //events and callbacks
         void setupEventListeners();
@@ -55,6 +57,12 @@ namespace cp_api {
         void destroyCommandResources();
 
         bool isRenderEnabled() const { return m_renderEnabled.load(std::memory_order_acquire); }
+
+        void addCamera(const uint32_t& id, CameraComponent& cam);
+        void removeCamera(const uint32_t& id);
+        
+        VkResult beginSecondaryForCamera(VkCommandBuffer cb, const CameraWork& cw);
+        VkResult beginSecondaryForImGui(VkCommandBuffer cb, const CameraWork& cw);
 
     private:
         //refs cache

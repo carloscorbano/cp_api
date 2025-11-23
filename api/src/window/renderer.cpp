@@ -59,80 +59,97 @@ namespace cp_api {
         auto& device = m_vulkan.GetDevice();
         auto& frame = m_frames[m_writeFrameIndex];
         auto& swp = m_vulkan.GetSwapchain();
+
+        std::vector<CameraWork> camerasSnapshot;
+        camerasSnapshot.reserve(8);
         
-        
+        auto& reg = m_world.GetRegistry();
+        auto camView = reg.view<CameraComponent, TransformComponent>();
 
-        //-----------------------------------------------------------------
-        // RECORD COMMANDS
-        //-----------------------------------------------------------------
-        std::vector<std::future<VkResult>> futures;
-        for(uint32_t i = 0; i < MAX_WORKERS_PER_FRAME; ++i)
-        {
-            auto task = m_threadPool.Submit(TaskPriority::HIGH, [](Renderer* renderer, const Frame& f, const uint32_t& index, Vulkan::Swapchain& swp) -> VkResult
-            {
-                auto result = renderer->m_vulkan.BeginCommandBuffer(f.workers[index].cb, { swp.colorFormat }, swp.depthFormat, swp.stencilFormat);
-                if(result != VK_SUCCESS) return result;
-                {
-                    //DRAW COMMANDS
-                    //Process world result here and record draw calls into f.secondaries[index]
-                }
-                return vkEndCommandBuffer(f.workers[index].cb);
-                return VK_SUCCESS;
+        for (auto e : camView) {
+            auto& camComp = camView.get<CameraComponent>(e);
+            CameraWork cw{};
+            cw.cameraEntityId = static_cast<uint32_t>(e);
+            cw.width = camComp.width;
+            cw.height = camComp.height;
+            cw.colorFormat = swp.colorFormat;
+            cw.depthFormat = swp.depthFormat;
 
-            }, this, frame, i, swp);
-
-            futures.push_back(std::move(task));
+            // Ensure Frame has CameraWork entry (create if needed)
+            // Initialize worker pools / cbs lazily (you may want to precreate)
+            camerasSnapshot.push_back(std::move(cw));
         }
 
-        for(auto& future : futures)
-        {
-            if(future.get() != VK_SUCCESS) CP_LOG_THROW("Window workers have failed to complete record task!");
+        struct WorkerFuture { uint32_t cameraId; uint32_t workerIndex; std::future<VkResult> fut; };
+        std::vector<WorkerFuture> workerFutures;
+
+        for (auto& cw : camerasSnapshot) {
+            // garantir entrada em frame.cameraWorks
+            auto & frameCW = frame.cameraWorks[cw.cameraEntityId];
+            // sincronizar dimensões/formats
+            frameCW.cameraEntityId = cw.cameraEntityId;
+            frameCW.width = cw.width;
+            frameCW.height = cw.height;
+            frameCW.colorFormat = cw.colorFormat;
+            frameCW.depthFormat = cw.depthFormat;
+
+
+            // criar pools/CBs se necessário
+            for (uint32_t i = 0; i < MAX_WORKERS_PER_CAMERA; ++i) {
+            auto &w = frameCW.workers[i];
+
+            auto task = m_threadPool.Submit(TaskPriority::HIGH,
+                [this](uint32_t frameIndex, entt::entity camera, uint32_t workerIndex) -> VkResult {
+                    return this->recordWorkerCommands(frameIndex, camera, workerIndex);
+                }, m_writeFrameIndex, (entt::entity)frameCW.cameraEntityId, i);
+
+
+            workerFutures.push_back( WorkerFuture{cw.cameraEntityId, i, std::move(task)} );
+            }
+        }
+
+        // Espera todos workers completarem gravação
+        for (auto &wf : workerFutures) {
+            VkResult rr = wf.fut.get();
+            if (rr != VK_SUCCESS) {
+                CP_LOG_THROW("Worker failed to record secondary CB");
+            }
         }
 
         //-----------------------------------------------------------------
         // IMGUI
         //-----------------------------------------------------------------
-        ImGui_ImplVulkan_NewFrame();
-        ImGui_ImplGlfw_NewFrame();
-        ImGui::NewFrame();
+        auto mainIter = frame.cameraWorks.find(m_mainCameraUID);
+        if(mainIter != frame.cameraWorks.end()) {
+            auto& mainCamWork = mainIter->second;
 
-        auto view = m_world.GetRegistry().view<UICanvas>();
-        view.each([](const entt::entity& e, UICanvas& canvas)
-        {
-            (void)e;
-            if(canvas.open)
-            {
-                ImGui::SetNextWindowPos(canvas.pos, ImGuiCond_Once, canvas.pivot);
-                ImGui::SetNextWindowSize(canvas.size, ImGuiCond_Once);
-
-                ImGui::Begin(canvas.name.c_str(), &canvas.open, canvas.flags);
-                {
-                    for(auto& child : canvas.children)
-                    {
-                        if(!child->enabled) continue;
-                        if(child->sameLine) ImGui::SameLine(child->sameLineSettings.offset, child->sameLineSettings.spacing);
-
-                        if(child->font) ImGui::PushFont(child->font);
-                        child->Draw();
-                        if(child->font) ImGui::PopFont();
-                    }
-                }
-                ImGui::End();
+            if (beginSecondaryForImGui(frame.imguiCmdBuffer, mainCamWork) != VK_SUCCESS) {
+                CP_LOG_THROW("Failed to begin imgui secondary");
             }
-        });
 
-        ImGui::Render();
-        auto& ImGuiCmdBuf = frame.imguiCmdBuffer;
+            ImGui_ImplVulkan_NewFrame();
+            ImGui_ImplGlfw_NewFrame();
+            ImGui::NewFrame();
 
-        if(m_vulkan.BeginCommandBuffer(ImGuiCmdBuf, { swp.colorFormat }, swp.depthFormat, swp.stencilFormat) != VK_SUCCESS) {
-            CP_LOG_THROW("Failed to begin imgui buffer!");        
-        }
+            // draw your UICanvas from world
+            auto viewUIC = m_world.GetRegistry().view<UICanvas>();
+            viewUIC.each([](const entt::entity& e, UICanvas& canvas)
+            {
+                (void)e;
+                if(canvas.open) {
+                    ImGui::SetNextWindowPos(canvas.pos, ImGuiCond_Once, canvas.pivot);
+                    ImGui::SetNextWindowSize(canvas.size, ImGuiCond_Once);
+                    ImGui::Begin(canvas.name.c_str(), &canvas.open, canvas.flags);
+                    for(auto& child : canvas.children) { if(!child->enabled) continue; if(child->font) ImGui::PushFont(child->font); child->Draw(); if(child->font) ImGui::PopFont(); }
+                    ImGui::End();
+                }
+            });
 
-        auto drawData = ImGui::GetDrawData();        
-        if(drawData) ImGui_ImplVulkan_RenderDrawData(drawData, ImGuiCmdBuf);
+            ImGui::Render();
+            auto drawData = ImGui::GetDrawData();
+            if(drawData) ImGui_ImplVulkan_RenderDrawData(drawData, frame.imguiCmdBuffer);
 
-        if(vkEndCommandBuffer(ImGuiCmdBuf) != VK_SUCCESS) {
-            CP_LOG_THROW("Failed to end ImGui command buffer!");
+            if (vkEndCommandBuffer(frame.imguiCmdBuffer) != VK_SUCCESS) CP_LOG_THROW("Failed to end imgui cb");
         }
 
         //-----------------------------------------------------------------
@@ -237,27 +254,23 @@ namespace cp_api {
             
             //set swapchain image to layout transfer dst
             auto& swp = m_vulkan.GetSwapchain();
-
-            // --- Begin: render each camera to its own render target ---
             auto& reg = m_world.GetRegistry();
-            auto camView = reg.view<CameraComponent, TransformComponent>();
-
-            for (auto e : camView) {
-                auto& camComp = camView.get<CameraComponent>(e);
-                uint32_t camW = camComp.width;
-                uint32_t camH = camComp.height;
+            
+            for (auto& kv : frame.cameraWorks) {
+                auto& camWork = kv.second;
+                uint32_t camW = camWork.width;
+                uint32_t camH = camWork.height;
 
                 // Acquire or recreate RT for this camera
-                RenderTarget* camRT = m_rtManager->Acquire((uint32_t)e, camW, camH, swp.colorFormat, swp.depthFormat);
-
+                RenderTarget* camRT = m_rtManager->Acquire(camWork.cameraEntityId, camW, camH, camWork.colorFormat, camWork.depthFormat);
                 auto& colorImage = camRT->GetColorImage();
                 auto& depthImage = camRT->GetDepthImage();
 
-                // ensure layouts (reusing your helpers)
+                // Ensure layouts
                 VulkanImage::TransitionImageLayout(frame.primary, colorImage, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
                 VulkanImage::TransitionImageLayout(frame.primary, depthImage, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
 
-                // Prepare attachments (clear values)
+                // Prepare attachments
                 VkRenderingAttachmentInfo colorAttachment{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
                 colorAttachment.imageView = colorImage.GetView();
                 colorAttachment.imageLayout = colorImage.GetLayout();
@@ -266,14 +279,12 @@ namespace cp_api {
                 VkClearValue clearColor = { {0.0f, 0.2f, 0.3f, 1.0f} };
                 colorAttachment.clearValue = clearColor;
 
-                VkRenderingAttachmentInfo depthAttachment{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
+                VkRenderingAttachmentInfo depthAttachment{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
                 depthAttachment.imageView = depthImage.GetView();
                 depthAttachment.imageLayout = depthImage.GetLayout();
                 depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
                 depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-                VkClearValue clearDepth{};
-                clearDepth.depthStencil.depth = 1.0f;
-                clearDepth.depthStencil.stencil = 0;
+                VkClearValue clearDepth{}; clearDepth.depthStencil.depth = 1.0f; clearDepth.depthStencil.stencil = 0;
                 depthAttachment.clearValue = clearDepth;
 
                 VkRenderingInfo renderingInfo{VK_STRUCTURE_TYPE_RENDERING_INFO};
@@ -286,42 +297,45 @@ namespace cp_api {
                 renderingInfo.pStencilAttachment = &depthAttachment;
                 renderingInfo.flags = VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT;
 
-                bool isMainCamera = (uint32_t)e == m_mainCameraUID;
+                bool isMainCamera = (camWork.cameraEntityId == m_mainCameraUID);
 
                 vkCmdBeginRendering(frame.primary, &renderingInfo);
                 {
-                    // NOTE:
-                    // - Atualmente você grava worker.cb de forma genérica; se no futuro cada worker
-                    //   gravar comandos específicos por câmera, aqui você deve executar apenas
-                    //   os command buffers correspondentes a esta câmera.
-                    //
-                    // For now, execute the worker secondaries as before (they are scene draws).
                     if(m_skipAfterSwapchainRecreation.load()) {
+                        // Skip executing previously recorded secondaries right after swapchain recreate
                         m_skipAfterSwapchainRecreation.store(false);
                     } else {
+                        // Collect worker secondaries
                         std::vector<VkCommandBuffer> cmds;
-                        for(auto& worker : frame.workers) {
-                            cmds.push_back(worker.cb);
+                        cmds.reserve(MAX_WORKERS_PER_CAMERA + 1);
+                        for (uint32_t i = 0; i < MAX_WORKERS_PER_CAMERA; ++i) {
+                            auto &w = camWork.workers[i];
+                            if (w.cb != VK_NULL_HANDLE) cmds.push_back(w.cb);
                         }
-                        // If you have per-camera secondary buffers in future, only push the ones for this camera.
-                        if (&frame.imguiCmdBuffer != VK_NULL_HANDLE && isMainCamera) cmds.push_back(frame.imguiCmdBuffer);
-                        vkCmdExecuteCommands(frame.primary, (uint32_t)cmds.size(), cmds.data());
+
+                        // If main camera and imgui secondary exists for this frame, append it
+                        if (isMainCamera && frame.imguiCmdBuffer != VK_NULL_HANDLE) cmds.push_back(frame.imguiCmdBuffer);
+
+
+                        if (!cmds.empty()) {
+                            vkCmdExecuteCommands(frame.primary, (uint32_t)cmds.size(), cmds.data());
+                        }
                     }
                 }
                 vkCmdEndRendering(frame.primary);
 
                 if (isMainCamera) {
+                    // Copy/blit to swapchain image (same as seu código original)
                     VulkanImage::TransitionImageLayout(frame.primary, colorImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
                     VulkanImage::TransitionImageLayout(frame.primary, swp.images[imageIndex], swp.colorFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
                     VulkanImage::CopyImage(frame.primary, colorImage.GetImage(), swp.images[imageIndex], colorImage.GetExtent().width, colorImage.GetExtent().height);
                     VulkanImage::TransitionImageLayout(frame.primary, swp.images[imageIndex], swp.colorFormat, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
                 }
+
+            // opcional: se houver pós-processamento que não precisa do BeginRendering, gravar como draws no primary aqui
             }
             // --- End: render each camera ---
-
-            if(vkEndCommandBuffer(frame.primary) != VK_SUCCESS) {
-                CP_LOG_THROW("Failed to end primary command buffer!");
-            }
+            if(vkEndCommandBuffer(frame.primary) != VK_SUCCESS) CP_LOG_THROW("Failed to end primary command buffer!");
 
             VkCommandBufferSubmitInfo cbsi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO};
             cbsi.commandBuffer = frame.primary;
@@ -381,6 +395,78 @@ namespace cp_api {
         }
     }
 
+    VkResult Renderer::recordWorkerCommands(const uint32_t& frameIndex, const entt::entity& camera, const uint32_t& workerIndex) {
+        Frame& frame = m_frames[frameIndex];
+        auto& cameraWork = frame.cameraWorks.at((uint32_t)camera);
+        auto transformComp = m_world.GetRegistry().try_get<TransformComponent>(camera);
+        auto camComponent = m_world.GetRegistry().try_get<CameraComponent>(camera);
+        if(!camComponent || !transformComp) CP_LOG_THROW("Invalid record command worker data!");
+
+        WorkerCmdData& wcd = cameraWork.workers[workerIndex];
+
+        // CB do worker
+        VkCommandBuffer cb = wcd.cb;
+
+        // Se o pool foi resetado pelo thread principal, você nunca deve resetar CB aqui
+        // Sempre use BEGIN com ONE_TIME_SUBMIT
+        VkCommandBufferBeginInfo beginInfo{};
+        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+        if(beginSecondaryForCamera(cb, cameraWork) != VK_SUCCESS) {
+            CP_LOG_THROW("Failed to begin command buffer!");
+        }
+
+        // --------------------
+        // 1) VIEWPORT / SCISSOR
+        // --------------------
+
+        VkExtent2D e {};
+        e.width = camComponent->width;
+        e.height = camComponent->height;
+
+        VkViewport viewport{};
+        viewport.x = 0.f;
+        viewport.y = 0.f;
+        viewport.width  = static_cast<float>(e.width);
+        viewport.height = static_cast<float>(e.height);
+        viewport.minDepth = 0.f;
+        viewport.maxDepth = 1.f;
+
+        vkCmdSetViewport(cb, 0, 1, &viewport);
+
+        VkRect2D scissor{};
+        scissor.offset = {0, 0};
+        scissor.extent = e;
+
+        vkCmdSetScissor(cb, 0, 1, &scissor);
+
+        // --------------------
+        // 2) CULLING (com thread-safe world)
+        // --------------------
+        // Supondo que sua spatial tree seja thread-safe.
+        // Se não for, eu te mostro uma variante sem ler m_world no worker.
+        
+        glm::mat4 vp = camComponent->GetProjectionMatrix() * camComponent->GetViewMatrix(transformComp->position, transformComp->rotation, transformComp->scale);        
+        shapes3D::Frustum camFrustum = shapes3D::Frustum::FromMatrix(vp);
+        std::vector<physics3D::HitInfo> hits;
+        m_world.GetWorldSpace().QueryFrustum(camFrustum, hits, camComponent->viewMask);
+
+        // --------------------
+        // 3) DRAW PASS
+        // --------------------
+        // Aqui você grava as chamadas de draw dos objetos visíveis  
+        // usando o componente "renderer" de cada entity.
+
+        for(auto& hit : hits) {
+            //     bindPipeline(cb, item);
+            //     bindDescriptorSets(cb, item);
+            //     bindVertexIndexBuffers(cb, item);
+            //     vkCmdDrawIndexed(cb, item.indexCount, 1, item.firstIndex, item.vertexOffset, 0);
+        }
+
+        return vkEndCommandBuffer(cb);
+    }
 #pragma region EVENTS_AND_CALLBACKS
     void Renderer::setupEventListeners() {
         m_window.GetEventDispatcher().Subscribe<onWindowDragStopEvent>([this](const onWindowDragStopEvent& e) {
@@ -402,19 +488,11 @@ namespace cp_api {
     }
 
     void Renderer::onCameraCreationCallback(entt::registry& reg, entt::entity e) {
-        // Pre-cria render target para a nova câmera (evita stall na primeira render)
-        // Assumimos que CameraComponent possui width e height (como no seu createMainCamera).
-        if (!reg.valid(e)) return;
-
-        auto &cam = reg.get<CameraComponent>(e);
-        // usa formatos do swapchain por padrão; se câmera tiver formatos próprios, adapte.
-        auto& swp = m_vulkan.GetSwapchain();
-        m_rtManager->Acquire((uint32_t)e, cam.width, cam.height, swp.colorFormat, swp.depthFormat);
+        addCamera((uint32_t)e, reg.get<CameraComponent>(e));
     }
 
     void Renderer::onCameraDestructionCallback(entt::registry& reg, entt::entity e) {
-        // Remove o RT associado à câmera destruída
-        m_rtManager->Release((uint32_t)e);
+        removeCamera((uint32_t)e);
     }
 #pragma endregion EVENTS_AND_CALLBACKS
 
@@ -627,7 +705,9 @@ namespace cp_api {
                 poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
                 poolInfo.queueFamilyIndex = m_vulkan.GetQueueFamilyIndices().graphicsFamily.value();
 
-                vkCreateCommandPool(device, &poolInfo, nullptr, &frame.primaryCmdPool);
+                if(vkCreateCommandPool(device, &poolInfo, nullptr, &frame.primaryCmdPool) != VK_SUCCESS) {
+                    CP_LOG_THROW("Failed to create command pool!");
+                }
 
                 VkCommandBufferAllocateInfo allocInfo{};
                 allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -635,31 +715,37 @@ namespace cp_api {
                 allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
                 allocInfo.commandBufferCount = 1;
 
-                vkAllocateCommandBuffers(device, &allocInfo, &frame.primary);
+                if(vkAllocateCommandBuffers(device, &allocInfo, &frame.primary) != VK_SUCCESS) {
+                    CP_LOG_THROW("Failed to allocate command buffer!");
+                }
             }
 
             // -------------------------------------------------------
             // WORKERS (command pools + secondary command buffers)
             // -------------------------------------------------------
-            for (uint16_t workerID = 0; workerID < MAX_WORKERS_PER_FRAME; workerID++) {
-                auto& worker = frame.workers[workerID];
+            if(!frame.cameraWorks.empty()) {
+                for(auto& camWork : frame.cameraWorks) {
+                    for(auto& worker : camWork.second.workers) {
+                        VkCommandPoolCreateInfo poolInfo{};
+                        poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+                        poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+                        poolInfo.queueFamilyIndex = m_vulkan.GetQueueFamilyIndices().graphicsFamily.value();
 
-                // command pool
-                VkCommandPoolCreateInfo poolInfo{};
-                poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-                poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-                poolInfo.queueFamilyIndex = m_vulkan.GetQueueFamilyIndices().graphicsFamily.value();
+                        if(vkCreateCommandPool(device, &poolInfo, nullptr, &worker.pool) != VK_SUCCESS) {
+                            CP_LOG_THROW("Failed to create command pool!");
+                        }
 
-                vkCreateCommandPool(device, &poolInfo, nullptr, &worker.pool);
+                        VkCommandBufferAllocateInfo allocInfo{};
+                        allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+                        allocInfo.commandPool = worker.pool;
+                        allocInfo.level = VK_COMMAND_BUFFER_LEVEL_SECONDARY;
+                        allocInfo.commandBufferCount = 1;
 
-                // secondary CB
-                VkCommandBufferAllocateInfo allocInfo{};
-                allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-                allocInfo.commandPool = worker.pool;
-                allocInfo.level = VK_COMMAND_BUFFER_LEVEL_SECONDARY;
-                allocInfo.commandBufferCount = 1;
-
-                vkAllocateCommandBuffers(device, &allocInfo, &worker.cb);
+                        if(vkAllocateCommandBuffers(device, &allocInfo, &worker.cb) != VK_SUCCESS) {
+                            CP_LOG_THROW("Failed to allocate command buffer!");
+                        }
+                    }
+                }
             }
 
             // -------------------------------------------------------
@@ -671,7 +757,9 @@ namespace cp_api {
                 poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
                 poolInfo.queueFamilyIndex = m_vulkan.GetQueueFamilyIndices().graphicsFamily.value();
 
-                vkCreateCommandPool(device, &poolInfo, nullptr, &frame.imguiCmdPool);
+                if(vkCreateCommandPool(device, &poolInfo, nullptr, &frame.imguiCmdPool) != VK_SUCCESS) {
+                    CP_LOG_THROW("Failed to create command pool!");
+                }
 
                 VkCommandBufferAllocateInfo allocInfo{};
                 allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -679,7 +767,9 @@ namespace cp_api {
                 allocInfo.level = VK_COMMAND_BUFFER_LEVEL_SECONDARY;
                 allocInfo.commandBufferCount = 1;
 
-                vkAllocateCommandBuffers(device, &allocInfo, &frame.imguiCmdBuffer);
+                if(vkAllocateCommandBuffers(device, &allocInfo, &frame.imguiCmdBuffer) != VK_SUCCESS) {
+                    CP_LOG_THROW("Failed to create command pool!");
+                }
             }
         }
     }
@@ -697,16 +787,15 @@ namespace cp_api {
                 frame.imguiCmdBuffer = VK_NULL_HANDLE;
             }
 
-            // -------------------------------------------------------
-            // WORKERS
-            // -------------------------------------------------------
-            for (auto& worker : frame.workers)
-            {
-                if (worker.pool != VK_NULL_HANDLE)
-                {
-                    vkDestroyCommandPool(device, worker.pool, nullptr);
-                    worker.pool = VK_NULL_HANDLE;
-                    worker.cb = VK_NULL_HANDLE;
+            if(!frame.cameraWorks.empty()) {
+                for(auto& camWork : frame.cameraWorks) {
+                    for(auto& worker : camWork.second.workers) {
+                        if(worker.pool != VK_NULL_HANDLE) {
+                            vkDestroyCommandPool(m_vulkan.GetDevice(), worker.pool, nullptr);
+                            worker.pool = VK_NULL_HANDLE;
+                            worker.cb = VK_NULL_HANDLE;
+                        }
+                    }
                 }
             }
 
@@ -721,6 +810,88 @@ namespace cp_api {
             }
         }
     }
-#pragma endregion INITIALIZATION_METHODS
+
+    void Renderer::addCamera(const uint32_t& id, CameraComponent& cam) {
+        for(auto& frame : m_frames) {
+            auto& camWork = frame.cameraWorks[id];
+            camWork.cameraEntityId = id;
+            camWork.width = cam.width;
+            camWork.height = cam.height;
+
+            auto& swp = m_vulkan.GetSwapchain();
+            auto& device = m_vulkan.GetDevice();
+
+            camWork.colorFormat = swp.colorFormat;
+            camWork.depthFormat = swp.depthFormat;
+            
+            for(auto& worker : camWork.workers) {
+                VkCommandPoolCreateInfo poolInfo {};
+                poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+                poolInfo.pNext = nullptr;
+                poolInfo.queueFamilyIndex = m_vulkan.GetQueueFamilyIndices().graphicsFamily.value();
+                poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+                if(vkCreateCommandPool(device, &poolInfo, nullptr, &worker.pool) != VK_SUCCESS) {
+                    CP_LOG_THROW("Failed to create worker cmd pool!");
+                }
+
+                VkCommandBufferAllocateInfo allocInfo {};
+                allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+                allocInfo.pNext = nullptr;
+                allocInfo.level = VK_COMMAND_BUFFER_LEVEL_SECONDARY;
+                allocInfo.commandPool = worker.pool;
+                allocInfo.commandBufferCount = 1;
+
+                if(vkAllocateCommandBuffers(device, &allocInfo, &worker.cb) != VK_SUCCESS) {
+                    CP_LOG_THROW("Failed to allocate cmd buffers!");
+                }
+            }
+        }
+    }
+
+    void Renderer::removeCamera(const uint32_t& id) {
+        for(auto& frame : m_frames) {
+            if(auto it = frame.cameraWorks.find(id); it != frame.cameraWorks.end()) {
+                CameraWork camWork = it->second;
+                for(auto& worker : camWork.workers) {
+                    if(worker.pool != VK_NULL_HANDLE) {
+                        vkDestroyCommandPool(m_vulkan.GetDevice(), worker.pool, nullptr);
+                        worker.pool = VK_NULL_HANDLE;
+                        worker.cb = VK_NULL_HANDLE;
+                    }
+                }
+            }
+        }
+    }
+
+    VkResult Renderer::beginSecondaryForCamera(VkCommandBuffer cb, const CameraWork& cw) {
+        VkFormat colorFmt = cw.colorFormat;
+        VkFormat depthFmt = cw.depthFormat;
+
+        VkCommandBufferInheritanceRenderingInfo inhRendering{};
+        inhRendering.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_RENDERING_INFO;
+        inhRendering.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+        inhRendering.colorAttachmentCount = 1;
+        inhRendering.pColorAttachmentFormats = &colorFmt;
+        inhRendering.depthAttachmentFormat = depthFmt;
+        inhRendering.stencilAttachmentFormat = depthFmt; // se houver separado, ajustar
+
+        VkCommandBufferInheritanceInfo inh{};
+        inh.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO;
+        inh.pNext = &inhRendering;
+        inh.framebuffer = VK_NULL_HANDLE; // dynamic rendering
+
+        VkCommandBufferBeginInfo beginInfo{};
+        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        beginInfo.flags = VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT | VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        beginInfo.pInheritanceInfo = &inh;
+
+        return vkBeginCommandBuffer(cb, &beginInfo);
+    }
+
+    VkResult Renderer::beginSecondaryForImGui(VkCommandBuffer cb, const CameraWork& cw) {
+        return beginSecondaryForCamera(cb, cw);
+    }
+
+    #pragma endregion INITIALIZATION_METHODS
 
 }
