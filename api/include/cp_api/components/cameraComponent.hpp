@@ -31,7 +31,6 @@ namespace cp_api {
 
         // State
         bool active = true;
-        bool primary = false;
 
         // Movement / control
         float moveSpeed = 5.0f;

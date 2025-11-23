@@ -1,5 +1,5 @@
 #include "cp_api/world/world.hpp"
-#include "cp_api/components/transform.hpp"
+#include "cp_api/components/transformComponent.hpp"
 #include "cp_api/core/debug.hpp"
 
 namespace cp_api {

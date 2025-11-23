@@ -7,8 +7,8 @@
 
 #include "cp_api/world/world.hpp"
 
-#include "cp_api/components/transform.hpp"
-#include "cp_api/components/camera.hpp"
+#include "cp_api/components/transformComponent.hpp"
+#include "cp_api/components/cameraComponent.hpp"
 #include "cp_api/components/dontDestroyOnLoad.hpp"
 #include "cp_api/components/uiComponent.hpp"
 
@@ -37,8 +37,8 @@ namespace cp_api {
         CP_LOG_INFO("Destroying renderer object!");
 
         m_renderEnabled.store(false);
-        m_renderThreadWorker.join();
 
+        m_renderThreadWorker.join();
         vkDeviceWaitIdle(m_vulkan.GetDevice());
         
         destroyImGui();
@@ -68,6 +68,8 @@ namespace cp_api {
 
         for (auto e : camView) {
             auto& camComp = camView.get<CameraComponent>(e);
+            if(!camComp.active) continue;
+
             CameraWork cw{};
             cw.cameraEntityId = static_cast<uint32_t>(e);
             cw.width = camComp.width;
@@ -75,10 +77,10 @@ namespace cp_api {
             cw.colorFormat = swp.colorFormat;
             cw.depthFormat = swp.depthFormat;
 
-            // Ensure Frame has CameraWork entry (create if needed)
-            // Initialize worker pools / cbs lazily (you may want to precreate)
             camerasSnapshot.push_back(std::move(cw));
         }
+
+        CP_LOG_INFO("{}", camView.size_hint());
 
         struct WorkerFuture { uint32_t cameraId; uint32_t workerIndex; std::future<VkResult> fut; };
         std::vector<WorkerFuture> workerFutures;
@@ -93,18 +95,16 @@ namespace cp_api {
             frameCW.colorFormat = cw.colorFormat;
             frameCW.depthFormat = cw.depthFormat;
 
-
             // criar pools/CBs se necessário
             for (uint32_t i = 0; i < MAX_WORKERS_PER_CAMERA; ++i) {
-            auto &w = frameCW.workers[i];
+                auto &w = frameCW.workers[i];
 
-            auto task = m_threadPool.Submit(TaskPriority::HIGH,
-                [this](uint32_t frameIndex, entt::entity camera, uint32_t workerIndex) -> VkResult {
-                    return this->recordWorkerCommands(frameIndex, camera, workerIndex);
-                }, m_writeFrameIndex, (entt::entity)frameCW.cameraEntityId, i);
+                auto task = m_threadPool.Submit(TaskPriority::HIGH,
+                    [this](uint32_t frameIndex, entt::entity camera, uint32_t workerIndex) -> VkResult {
+                        return this->recordWorkerCommands(frameIndex, camera, workerIndex);
+                    }, m_writeFrameIndex, (entt::entity)frameCW.cameraEntityId, i);
 
-
-            workerFutures.push_back( WorkerFuture{cw.cameraEntityId, i, std::move(task)} );
+                workerFutures.push_back( WorkerFuture{cw.cameraEntityId, i, std::move(task)} );
             }
         }
 
@@ -571,12 +571,13 @@ namespace cp_api {
             if(vkCreateSemaphore(device, &semaphoreInfo, nullptr, &frame.imageAvailable) != VK_SUCCESS) {
                 CP_LOG_THROW("Failed to create binary semaphore!");
             }
+
+            frame.imguiCmdPool = VK_NULL_HANDLE;
+            frame.imguiCmdBuffer = VK_NULL_HANDLE;
         }
     }
 
     void Renderer::destroyFrames() {
-        // Se não houver device inicializado, não destrói nada
-
         auto& device = m_vulkan.GetDevice();
         if (device == VK_NULL_HANDLE) return;
 
