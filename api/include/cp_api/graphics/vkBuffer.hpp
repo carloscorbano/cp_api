@@ -19,11 +19,13 @@ namespace cp_api {
                 destroy();
 
                 buffer = o.buffer;
+                allocator = o.allocator;
                 allocation = o.allocation;
                 allocationInfo = o.allocationInfo;
                 usage = o.usage;
 
                 o.buffer = VK_NULL_HANDLE;
+                o.allocator = VK_NULL_HANDLE;
                 o.allocation = VK_NULL_HANDLE;
                 o.allocationInfo = {};
                 o.usage = 0;

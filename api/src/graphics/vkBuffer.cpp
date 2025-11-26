@@ -16,6 +16,8 @@ namespace cp_api {
     
         VmaAllocationCreateInfo allocInfo{};
         allocInfo.usage = memoryUsage;
+
+        result.allocator = allocator;
     
         if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &result.buffer, &result.allocation, &result.allocationInfo) != VK_SUCCESS)
         {
@@ -24,7 +26,6 @@ namespace cp_api {
     
         CP_LOG_INFO("Created buffer of size {} bytes", result.allocationInfo.size);
         result.usage = usage;
-        result.allocator = allocator;
     
         return result;
     }

@@ -67,8 +67,12 @@ namespace cp_api {
         //-----------------------------------------------------------------------------------
         // TEST AREA
         //-----------------------------------------------------------------------------------
-        
-        
+        std::vector<uint32_t> data = { 0, 1, 2, 3, 4, 5, 6, 7,8, 9, 10};
+        VulkanBuffer test;
+        auto& vk = m_window->GetVulkan();
+
+        test = VulkanBuffer::CreateBuffer(vk.GetVmaAllocator(), sizeof(uint32_t) * data.size(), VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_AUTO);
+        VulkanBuffer::CopyDataToGPU(vk.GetDevice(), vk.GetVmaAllocator(), vk.GetSingleTimeCommandPool(), vk.GetQueue(QueueType::GRAPHICS), data.data(), test, sizeof(uint32_t) * data.size());
         //-----------------------------------------------------------------------------------
         // END OF TEST AREA
         //-----------------------------------------------------------------------------------
