@@ -57,7 +57,6 @@ void SpatialTree2D::QueryCircle(const cp_api::shapes2D::Circle& circle, std::vec
 
         if (distSq <= radius * radius) {
             HitInfo hit;
-            hit.hit = true;
             hit.id = entry.id;
             hit.layer = entry.layer;
             hit.userData = entry.userData;
@@ -155,7 +154,6 @@ void SpatialTree2D::QueryCapsule(const cp_api::shapes2D::Capsule& capsule, std::
 
         if (dist <= radius) {
             cp_api::physics2D::HitInfo hit;
-            hit.hit = true;
             hit.id = entry.id;
             hit.layer = entry.layer;
             hit.userData = entry.userData;
@@ -187,7 +185,6 @@ void SpatialTree2D::QueryBox(const cp_api::physics2D::AABB& range, std::vector<c
             continue;
 
         HitInfo hit;
-        hit.hit = true;
         hit.id = e.id;
         hit.layer = e.layer;
         hit.userData = e.userData;

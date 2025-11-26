@@ -19,7 +19,6 @@ namespace cp_api::physics2D {
     };
 
     struct HitInfo {
-        bool hit = false;
         float distance = 0.0f;
         float fraction = 0.0f;   // distance / maxDistance (opcional)
         float penetration = 0.0f;
@@ -47,7 +46,6 @@ namespace cp_api::physics3D {
     };
 
     struct HitInfo {
-        bool hit = false;
         float distance = 0.0f;
         float fraction = 0.0f;   // distance / maxDistance (opcional)
         float penetration = 0.0f;

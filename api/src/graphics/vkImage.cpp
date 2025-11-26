@@ -1,4 +1,4 @@
-#include "cp_api/window/vkImage.hpp"
+#include "cp_api/graphics/vkImage.hpp"
 #include "cp_api/core/debug.hpp"
 
 namespace cp_api {

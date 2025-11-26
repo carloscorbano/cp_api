@@ -1,11 +1,19 @@
 #include "cp_api/framework.hpp"
 #include "cp_api/core/debug.hpp"
-#include "cp_api/window/window.hpp"
+
+#include "cp_api/graphics/window.hpp"
+#include "cp_api/graphics/vulkan.hpp"
+
 #include "cp_api/world/world.hpp"
+
 #include "cp_api/core/threadPool.hpp"
+
 #include "cp_api/components/uiComponent.hpp"
 #include "cp_api/components/cameraComponent.hpp"
 #include "cp_api/components/transformComponent.hpp"
+#include "cp_api/components/rendererComponent.hpp"
+
+#include "cp_api/graphics/vkBuffer.hpp"
 
 namespace cp_api {
     Framework::Framework() {
@@ -56,9 +64,14 @@ namespace cp_api {
         double timerUpdate = 0.0;
 #endif
 
-        auto ce = m_world->GetRegistry().create();
-        auto& tc = m_world->GetRegistry().emplace<TransformComponent>(ce, math::Vec3(0), math::Quat(math::Vec3(0.0)), math::Vec3(1.0), physics3D::AABB(math::Vec3(0), math::Vec3(0)));
-        auto& cc = m_world->GetRegistry().emplace<CameraComponent>(ce, 800, 600);
+        //-----------------------------------------------------------------------------------
+        // TEST AREA
+        //-----------------------------------------------------------------------------------
+        
+        
+        //-----------------------------------------------------------------------------------
+        // END OF TEST AREA
+        //-----------------------------------------------------------------------------------
 
         while(!m_window->ShouldClose() && m_isRunning) {
             m_diagnostics->BeginFrame();

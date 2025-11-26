@@ -17,18 +17,18 @@ add_library(cp_api STATIC
     src/core/serializable.cpp
     src/core/stb.inc.cpp
 
-    src/window/glfw.inc.cpp
-    src/window/window.cpp
-    src/window/inputManager.cpp
-    src/window/vulkan.cpp
-    src/window/vma.inc.cpp
-    src/window/vkBuffer.cpp
-    src/window/vkImage.cpp
-    src/window/vkTexture.cpp
-    src/window/imgui.inc.cpp
-    src/window/renderer.cpp
-    src/window/renderTarget.cpp
-    src/window/renderTargetManager.cpp
+    src/graphics/glfw.inc.cpp
+    src/graphics/window.cpp
+    src/graphics/inputManager.cpp
+    src/graphics/vulkan.cpp
+    src/graphics/vma.inc.cpp
+    src/graphics/vkBuffer.cpp
+    src/graphics/vkImage.cpp
+    src/graphics/vkTexture.cpp
+    src/graphics/imgui.inc.cpp
+    src/graphics/renderer.cpp
+    src/graphics/renderTarget.cpp
+    src/graphics/renderTargetManager.cpp
     
     src/containers/ntree.cpp
     src/containers/spatialTree.cpp

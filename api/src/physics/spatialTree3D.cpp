@@ -63,7 +63,6 @@ void SpatialTree3D::QuerySphere(const cp_api::shapes3D::Sphere& sphere, std::vec
 
         if (dist <= sphere.radius) {
             HitInfo hit{};
-            hit.hit = true;
             hit.id = entry.id;
             hit.layer = entry.layer;
             hit.userData = entry.userData; // ✅ copia o ponteiro
@@ -168,7 +167,6 @@ void SpatialTree3D::QueryCapsule(const cp_api::shapes3D::Capsule& capsule, std::
 
         if (dist <= capsule.radius) {
             HitInfo hit{};
-            hit.hit = true;
             hit.id = entry.id;
             hit.layer = entry.layer;
             hit.userData = entry.userData; // ✅ copia userData
@@ -215,7 +213,6 @@ void SpatialTree3D::QueryCube(const cp_api::physics3D::AABB& range, std::vector<
             continue;
 
         HitInfo hit;
-        hit.hit = true;
         hit.id = e.id;
         hit.layer = e.layer;
         hit.userData = e.userData; // ✅ copia userData
@@ -285,7 +282,9 @@ void SpatialTree3D::QueryRay(const cp_api::physics3D::Ray& ray, std::vector<cp_a
     }
 }
 
-void SpatialTree3D::QueryFrustum(const cp_api::shapes3D::Frustum& frustum, std::vector<uint32_t>& outIds, uint32_t queryMask) const {
+void SpatialTree3D::QueryFrustum(const cp_api::shapes3D::Frustum& frustum,
+                                 std::vector<uint32_t>& outIds,
+                                 uint32_t queryMask) const {
     this->Traverse([&](const auto& entry) {
         if ((entry.layer & queryMask) == 0) return true;
         if (frustum.Intersects(entry.bounds))
@@ -294,15 +293,69 @@ void SpatialTree3D::QueryFrustum(const cp_api::shapes3D::Frustum& frustum, std::
     });
 }
 
-void SpatialTree3D::QueryFrustum(const cp_api::shapes3D::Frustum& frustum, std::vector<cp_api::physics3D::HitInfo>& outInfos, uint32_t queryMask) const {
-    this->Traverse([&](const auto& entry) {
-        if ((entry.layer & queryMask) == 0) return true;
-        if (frustum.Intersects(entry.bounds)) {
-            cp_api::physics3D::HitInfo hit{};
-            hit.id = entry.id;
-            hit.userData = entry.userData;
-            outInfos.push_back(hit);
+void SpatialTree3D::QueryFrustum(const cp_api::shapes3D::Frustum& frustum,
+                                 std::vector<cp_api::physics3D::HitInfo>& outInfos,
+                                 uint32_t queryMask) const
+{
+    using namespace cp_api::physics3D;
+    using namespace cp_api::math;
+    using namespace cp_api::shapes3D;
+
+    this->Traverse([&](const auto& entry)
+    {
+        if ((entry.layer & queryMask) == 0)
+            return true;
+
+        const AABB& box = entry.bounds;
+
+        if (!frustum.Intersects(box))
+            return true;
+
+        // ===============================
+        //      Construção do HitInfo
+        // ===============================
+
+        HitInfo hit{};
+        hit.id       = entry.id;
+        hit.layer    = entry.layer;
+        hit.userData = entry.userData;
+
+        // Centro do bounding box
+        Vec3 center = box.Center();
+        hit.point = center;
+
+        // -------------------------------------------------------
+        // Distância e normal com base em PLANO DO FRUSTUM
+        // -------------------------------------------------------
+        float minDist = FLT_MAX;
+        Vec3  bestNormal = {0,0,1};
+
+        for (const auto& plane : frustum.planes)
+        {
+            // Distância do centro ao plano (negativo = fora)
+            float d = glm::dot(plane.normal, center) + plane.distance;
+
+            if (d < minDist)
+            {
+                minDist = d;
+                bestNormal = plane.normal;
+            }
         }
+
+        hit.distance = minDist;          // distância ao clipping mais próximo
+        hit.normal   = Normalize(bestNormal);
+        hit.penetration = std::max(0.0f, minDist);  // o quanto está "dentro" do frustum
+
+        // fraction baseado em Near/Far (normalizado 0..1)
+        float farDist  =
+            glm::length(frustum.planes[Frustum::PlaneIndex::Far].normal   * frustum.planes[Frustum::PlaneIndex::Far].distance);
+        float nearDist =
+            glm::length(frustum.planes[Frustum::PlaneIndex::Near].normal  * frustum.planes[Frustum::PlaneIndex::Near].distance);
+
+        hit.fraction = (minDist - nearDist) / (farDist - nearDist);
+        hit.fraction = std::clamp(hit.fraction, 0.0f, 1.0f);
+
+        outInfos.push_back(hit);
         return true;
     });
 }

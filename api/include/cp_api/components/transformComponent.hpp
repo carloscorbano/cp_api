@@ -14,7 +14,24 @@ namespace cp_api {
         math::Vec3 position;
         math::Quat rotation;
         math::Vec3 scale;
+        TransformComponent* parent = nullptr;
 
         physics3D::AABB boundary;
+
+        math::Mat4 GetModelMatrix() const {
+            math::Mat4 model{1.0f};
+
+            model = glm::translate(model, position);
+            model = glm::mat4_cast(rotation) * model;
+            model = glm::scale(model, scale);
+
+            return model;
+        }
+
+        math::Mat4 GetWorldMatrix() const {
+            if (parent)
+                return parent->GetWorldMatrix() * GetModelMatrix();
+            return GetModelMatrix();
+        }
     };
 } // namespace cp_api

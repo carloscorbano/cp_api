@@ -1,6 +1,6 @@
 #pragma once
 
-#include "cp_api/window/imgui.inc.hpp"
+#include "cp_api/graphics/imgui.inc.hpp"
 #include <string>
 #include <vector>
 #include <memory>

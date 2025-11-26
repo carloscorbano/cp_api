@@ -72,6 +72,7 @@ namespace cp_api {
         Swapchain& GetSwapchain() { return m_swapchain; }
         VmaAllocator GetVmaAllocator() { return m_vmaAllocator; }
         QueueFamilyIndices GetQueueFamilyIndices() const { return m_familyIndices; }
+        VkCommandPool GetSingleTimeCommandPool() { return m_singleTimeCmdPool; }
 
         VkCommandBuffer BeginSingleTimeCommands();
         void EndSingleTimeCommands(VkCommandBuffer commandBuffer);

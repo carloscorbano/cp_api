@@ -1,7 +1,7 @@
-#include "cp_api/window/renderer.hpp"
-#include "cp_api/window/window.hpp"
-#include "cp_api/window/vulkan.hpp"
-#include "cp_api/window/renderTargetManager.hpp"
+#include "cp_api/graphics/renderer.hpp"
+#include "cp_api/graphics/window.hpp"
+#include "cp_api/graphics/vulkan.hpp"
+#include "cp_api/graphics/renderTargetManager.hpp"
 #include "cp_api/core/threadPool.hpp"
 #include "cp_api/core/debug.hpp"
 
@@ -11,6 +11,9 @@
 #include "cp_api/components/cameraComponent.hpp"
 #include "cp_api/components/dontDestroyOnLoad.hpp"
 #include "cp_api/components/uiComponent.hpp"
+#include "cp_api/components/rendererComponent.hpp"
+
+#include <span>
 
 namespace cp_api {
     Renderer::Renderer(Window& window, World& world, ThreadPool& threadPool) 
@@ -58,53 +61,115 @@ namespace cp_api {
         //cache
         auto& device = m_vulkan.GetDevice();
         auto& frame = m_frames[m_writeFrameIndex];
-        auto& swp = m_vulkan.GetSwapchain();
-
-        std::vector<CameraWork> camerasSnapshot;
-        camerasSnapshot.reserve(8);
-        
+        auto& swp = m_vulkan.GetSwapchain();        
         auto& reg = m_world.GetRegistry();
-        auto camView = reg.view<CameraComponent, TransformComponent>();
-
-        for (auto e : camView) {
-            auto& camComp = camView.get<CameraComponent>(e);
-            if(!camComp.active) continue;
-
-            CameraWork cw{};
-            cw.cameraEntityId = static_cast<uint32_t>(e);
-            cw.width = camComp.width;
-            cw.height = camComp.height;
-            cw.colorFormat = swp.colorFormat;
-            cw.depthFormat = swp.depthFormat;
-
-            camerasSnapshot.push_back(std::move(cw));
-        }
-
-        CP_LOG_INFO("{}", camView.size_hint());
+        auto& world = m_world.GetWorldSpace();
+        auto camView = reg.view<TransformComponent, CameraComponent>();
 
         struct WorkerFuture { uint32_t cameraId; uint32_t workerIndex; std::future<VkResult> fut; };
         std::vector<WorkerFuture> workerFutures;
 
-        for (auto& cw : camerasSnapshot) {
-            // garantir entrada em frame.cameraWorks
-            auto & frameCW = frame.cameraWorks[cw.cameraEntityId];
-            // sincronizar dimensões/formats
-            frameCW.cameraEntityId = cw.cameraEntityId;
-            frameCW.width = cw.width;
-            frameCW.height = cw.height;
-            frameCW.colorFormat = cw.colorFormat;
-            frameCW.depthFormat = cw.depthFormat;
+        for (auto [e, tc, cc] : camView.each()) {
+            if(!cc.active) return;
 
-            // criar pools/CBs se necessário
+            uint32_t id = static_cast<uint32_t>(e);
+            CameraWork& frameCW = frame.cameraWorks[id];
+            frameCW.cameraEntityId = id;
+            frameCW.width = cc.width;
+            frameCW.height = cc.height;
+            frameCW.colorFormat = swp.colorFormat;
+            frameCW.depthFormat = swp.depthFormat;
+            frameCW.stencilFormat = swp.stencilFormat;
+
+            // --------------------
+            // 1) CULLING 
+            // --------------------
+            math::Mat4 vp = cc.GetProjectionMatrix() * cc.GetViewMatrix(tc.position, tc.rotation, tc.scale);
+            shapes3D::Frustum frustum = shapes3D::Frustum::FromMatrix(vp);
+            std::vector<physics3D::HitInfo> hits;
+            world.QueryFrustum(frustum, hits, cc.viewMask);
+
+            //if hit anything, continue
+            if(hits.empty()) continue;
+
+            // --------------------
+            // ) ASYNC WORK 
+            // --------------------
             for (uint32_t i = 0; i < MAX_WORKERS_PER_CAMERA; ++i) {
-                auto &w = frameCW.workers[i];
-
                 auto task = m_threadPool.Submit(TaskPriority::HIGH,
-                    [this](uint32_t frameIndex, entt::entity camera, uint32_t workerIndex) -> VkResult {
-                        return this->recordWorkerCommands(frameIndex, camera, workerIndex);
-                    }, m_writeFrameIndex, (entt::entity)frameCW.cameraEntityId, i);
+                    [](Frame& frame, CameraWork& camWork, const uint32_t& workerIndex, std::span<const physics3D::HitInfo> hits, const uint32_t& maxWorkers, entt::registry* registry, glm::mat4& vp) -> VkResult {
+                        WorkerCmdData& wcd = camWork.workers[workerIndex];
+                        VkCommandBuffer cb = wcd.cb;
 
-                workerFutures.push_back( WorkerFuture{cw.cameraEntityId, i, std::move(task)} );
+                        VkCommandBufferInheritanceRenderingInfo inhRendering{};
+                        inhRendering.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_RENDERING_INFO;
+                        inhRendering.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+                        inhRendering.colorAttachmentCount = 1;
+                        inhRendering.pColorAttachmentFormats = &camWork.colorFormat;
+                        inhRendering.depthAttachmentFormat = camWork.depthFormat;
+                        inhRendering.stencilAttachmentFormat = camWork.stencilFormat;
+
+                        VkCommandBufferInheritanceInfo inh{};
+                        inh.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO;
+                        inh.pNext = &inhRendering;
+                        inh.framebuffer = VK_NULL_HANDLE;
+
+                        VkCommandBufferBeginInfo beginInfo{};
+                        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+                        beginInfo.flags = VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT | VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+                        beginInfo.pInheritanceInfo = &inh;
+
+                        if(vkBeginCommandBuffer(cb, &beginInfo) != VK_SUCCESS) {
+                            CP_LOG_THROW("Failed to begin command buffer!");
+                        }
+
+                        // --------------------
+                        // VIEWPORT / SCISSOR
+                        // --------------------
+                        VkExtent2D e {};
+                        e.width = camWork.width;
+                        e.height = camWork.height;
+
+                        CP_LOG_WARN("{} {}", e.width, e.height);
+
+                        VkViewport viewport{};
+                        viewport.x = 0.f;
+                        viewport.y = 0.f;
+                        viewport.width  = static_cast<float>(e.width);
+                        viewport.height = static_cast<float>(e.height);
+                        viewport.minDepth = 0.f;
+                        viewport.maxDepth = 1.f;
+
+                        vkCmdSetViewport(cb, 0, 1, &viewport);
+
+                        VkRect2D scissor{};
+                        scissor.offset = {0, 0};
+                        scissor.extent = e;
+
+                        vkCmdSetScissor(cb, 0, 1, &scissor);
+
+                        // --------------------
+                        // DRAW PASS
+                        // --------------------
+                        uint32_t curHitIndex = 0;
+                        while(curHitIndex < hits.size()) {
+                            auto& curHit = hits[curHitIndex];
+                            curHitIndex += maxWorkers;
+
+                            //get hit entity
+                            auto [tc, rc] = registry->try_get<TransformComponent, RendererComponent>((entt::entity)curHit.id);
+                            if(!tc || !rc) continue;
+                            
+                            math::Mat4 model = tc->GetWorldMatrix();
+
+                            //camera data
+                            rc->Draw(cb, model, vp, curHit.distance);
+                        }
+
+                        return vkEndCommandBuffer(cb);
+                    }, frame, frameCW, i, hits, MAX_WORKERS_PER_CAMERA, &reg, vp);
+
+                workerFutures.push_back( WorkerFuture{id, i, std::move(task)} );
             }
         }
 
@@ -123,8 +188,26 @@ namespace cp_api {
         if(mainIter != frame.cameraWorks.end()) {
             auto& mainCamWork = mainIter->second;
 
-            if (beginSecondaryForImGui(frame.imguiCmdBuffer, mainCamWork) != VK_SUCCESS) {
-                CP_LOG_THROW("Failed to begin imgui secondary");
+            VkCommandBufferInheritanceRenderingInfo inhRendering{};
+            inhRendering.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_RENDERING_INFO;
+            inhRendering.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+            inhRendering.colorAttachmentCount = 1;
+            inhRendering.pColorAttachmentFormats = &swp.colorFormat;
+            inhRendering.depthAttachmentFormat = swp.depthFormat;
+            inhRendering.stencilAttachmentFormat = swp.stencilFormat;
+
+            VkCommandBufferInheritanceInfo inh{};
+            inh.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO;
+            inh.pNext = &inhRendering;
+            inh.framebuffer = VK_NULL_HANDLE;
+
+            VkCommandBufferBeginInfo beginInfo{};
+            beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+            beginInfo.flags = VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT | VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+            beginInfo.pInheritanceInfo = &inh;
+
+            if(vkBeginCommandBuffer(frame.imguiCmdBuffer, &beginInfo) != VK_SUCCESS) {
+                CP_LOG_THROW("Failed to begin command buffer!");
             }
 
             ImGui_ImplVulkan_NewFrame();
@@ -310,7 +393,7 @@ namespace cp_api {
                         cmds.reserve(MAX_WORKERS_PER_CAMERA + 1);
                         for (uint32_t i = 0; i < MAX_WORKERS_PER_CAMERA; ++i) {
                             auto &w = camWork.workers[i];
-                            if (w.cb != VK_NULL_HANDLE) cmds.push_back(w.cb);
+                            // if (w.cb != VK_NULL_HANDLE) cmds.push_back(w.cb);
                         }
 
                         // If main camera and imgui secondary exists for this frame, append it
@@ -393,79 +476,6 @@ namespace cp_api {
             //cleanup unused render targets.
             m_rtManager->PurgeUnused();
         }
-    }
-
-    VkResult Renderer::recordWorkerCommands(const uint32_t& frameIndex, const entt::entity& camera, const uint32_t& workerIndex) {
-        Frame& frame = m_frames[frameIndex];
-        auto& cameraWork = frame.cameraWorks.at((uint32_t)camera);
-        auto transformComp = m_world.GetRegistry().try_get<TransformComponent>(camera);
-        auto camComponent = m_world.GetRegistry().try_get<CameraComponent>(camera);
-        if(!camComponent || !transformComp) CP_LOG_THROW("Invalid record command worker data!");
-
-        WorkerCmdData& wcd = cameraWork.workers[workerIndex];
-
-        // CB do worker
-        VkCommandBuffer cb = wcd.cb;
-
-        // Se o pool foi resetado pelo thread principal, você nunca deve resetar CB aqui
-        // Sempre use BEGIN com ONE_TIME_SUBMIT
-        VkCommandBufferBeginInfo beginInfo{};
-        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-
-        if(beginSecondaryForCamera(cb, cameraWork) != VK_SUCCESS) {
-            CP_LOG_THROW("Failed to begin command buffer!");
-        }
-
-        // --------------------
-        // 1) VIEWPORT / SCISSOR
-        // --------------------
-
-        VkExtent2D e {};
-        e.width = camComponent->width;
-        e.height = camComponent->height;
-
-        VkViewport viewport{};
-        viewport.x = 0.f;
-        viewport.y = 0.f;
-        viewport.width  = static_cast<float>(e.width);
-        viewport.height = static_cast<float>(e.height);
-        viewport.minDepth = 0.f;
-        viewport.maxDepth = 1.f;
-
-        vkCmdSetViewport(cb, 0, 1, &viewport);
-
-        VkRect2D scissor{};
-        scissor.offset = {0, 0};
-        scissor.extent = e;
-
-        vkCmdSetScissor(cb, 0, 1, &scissor);
-
-        // --------------------
-        // 2) CULLING (com thread-safe world)
-        // --------------------
-        // Supondo que sua spatial tree seja thread-safe.
-        // Se não for, eu te mostro uma variante sem ler m_world no worker.
-        
-        glm::mat4 vp = camComponent->GetProjectionMatrix() * camComponent->GetViewMatrix(transformComp->position, transformComp->rotation, transformComp->scale);        
-        shapes3D::Frustum camFrustum = shapes3D::Frustum::FromMatrix(vp);
-        std::vector<physics3D::HitInfo> hits;
-        m_world.GetWorldSpace().QueryFrustum(camFrustum, hits, camComponent->viewMask);
-
-        // --------------------
-        // 3) DRAW PASS
-        // --------------------
-        // Aqui você grava as chamadas de draw dos objetos visíveis  
-        // usando o componente "renderer" de cada entity.
-
-        for(auto& hit : hits) {
-            //     bindPipeline(cb, item);
-            //     bindDescriptorSets(cb, item);
-            //     bindVertexIndexBuffers(cb, item);
-            //     vkCmdDrawIndexed(cb, item.indexCount, 1, item.firstIndex, item.vertexOffset, 0);
-        }
-
-        return vkEndCommandBuffer(cb);
     }
 #pragma region EVENTS_AND_CALLBACKS
     void Renderer::setupEventListeners() {
@@ -852,7 +862,7 @@ namespace cp_api {
     void Renderer::removeCamera(const uint32_t& id) {
         for(auto& frame : m_frames) {
             if(auto it = frame.cameraWorks.find(id); it != frame.cameraWorks.end()) {
-                CameraWork camWork = it->second;
+                CameraWork& camWork = it->second;
                 for(auto& worker : camWork.workers) {
                     if(worker.pool != VK_NULL_HANDLE) {
                         vkDestroyCommandPool(m_vulkan.GetDevice(), worker.pool, nullptr);
@@ -862,35 +872,6 @@ namespace cp_api {
                 }
             }
         }
-    }
-
-    VkResult Renderer::beginSecondaryForCamera(VkCommandBuffer cb, const CameraWork& cw) {
-        VkFormat colorFmt = cw.colorFormat;
-        VkFormat depthFmt = cw.depthFormat;
-
-        VkCommandBufferInheritanceRenderingInfo inhRendering{};
-        inhRendering.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_RENDERING_INFO;
-        inhRendering.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-        inhRendering.colorAttachmentCount = 1;
-        inhRendering.pColorAttachmentFormats = &colorFmt;
-        inhRendering.depthAttachmentFormat = depthFmt;
-        inhRendering.stencilAttachmentFormat = depthFmt; // se houver separado, ajustar
-
-        VkCommandBufferInheritanceInfo inh{};
-        inh.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO;
-        inh.pNext = &inhRendering;
-        inh.framebuffer = VK_NULL_HANDLE; // dynamic rendering
-
-        VkCommandBufferBeginInfo beginInfo{};
-        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        beginInfo.flags = VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT | VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-        beginInfo.pInheritanceInfo = &inh;
-
-        return vkBeginCommandBuffer(cb, &beginInfo);
-    }
-
-    VkResult Renderer::beginSecondaryForImGui(VkCommandBuffer cb, const CameraWork& cw) {
-        return beginSecondaryForCamera(cb, cw);
     }
 
     #pragma endregion INITIALIZATION_METHODS

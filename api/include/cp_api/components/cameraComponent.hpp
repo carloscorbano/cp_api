@@ -1,7 +1,7 @@
 #pragma once
 
 #include "cp_api/core/math.hpp"
-#include "cp_api/window/renderTarget.hpp"
+#include "cp_api/graphics/renderTarget.hpp"
 
 namespace cp_api {
     enum class CameraType { Perspective, Orthographic };

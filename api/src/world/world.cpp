@@ -27,7 +27,8 @@ namespace cp_api {
 
     void World::onTransformAddCallback(entt::registry& reg, entt::entity e) {
         TransformComponent& tc = reg.get<TransformComponent>(e);
-        m_worldSpace.Insert((uint32_t)e, tc.boundary, nullptr);
+        physics3D::AABB b(tc.position - tc.boundary.Min(), tc.position + tc.boundary.Max());
+        m_worldSpace.Insert((uint32_t)e, b, nullptr);
     }
 
     void World::onTransformRemovedCallback(entt::registry& reg, entt::entity e) {

@@ -1,5 +1,5 @@
-#include "cp_api/window/renderTargetManager.hpp"
-#include "cp_api/window/vulkan.hpp"
+#include "cp_api/graphics/renderTargetManager.hpp"
+#include "cp_api/graphics/vulkan.hpp"
 #include "cp_api/core/debug.hpp"
 
 namespace cp_api {

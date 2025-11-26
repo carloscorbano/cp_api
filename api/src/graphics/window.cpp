@@ -1,4 +1,4 @@
-#include "cp_api/window/window.hpp"
+#include "cp_api/graphics/window.hpp"
 #include "cp_api/core/debug.hpp"
 #include <algorithm>
 #include <iostream>

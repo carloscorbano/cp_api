@@ -1,4 +1,4 @@
-#include "cp_api/window/inputManager.hpp"
+#include "cp_api/graphics/inputManager.hpp"
 #include <algorithm>
 
 namespace cp_api {

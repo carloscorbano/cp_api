@@ -27,10 +27,11 @@ namespace cp_api {
         Renderer& operator=(Renderer&&) = delete;
 
         void Render();
+
+        VkDescriptorPool& GetGlobalDescriptorPool() { return g_descriptorPool; }
         
     private:
         void submitThreadWork();
-        VkResult recordWorkerCommands(const uint32_t& frameIndex, const entt::entity& camera, const uint32_t& workerIndex);
 
         //events and callbacks
         void setupEventListeners();
@@ -61,9 +62,6 @@ namespace cp_api {
         void addCamera(const uint32_t& id, CameraComponent& cam);
         void removeCamera(const uint32_t& id);
         
-        VkResult beginSecondaryForCamera(VkCommandBuffer cb, const CameraWork& cw);
-        VkResult beginSecondaryForImGui(VkCommandBuffer cb, const CameraWork& cw);
-
     private:
         //refs cache
         Window& m_window;

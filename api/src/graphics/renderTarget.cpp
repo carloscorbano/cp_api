@@ -1,4 +1,4 @@
-#include "cp_api/window/renderTarget.hpp"
+#include "cp_api/graphics/renderTarget.hpp"
 
 namespace cp_api {
     void RenderTarget::Create(VkDevice device, VmaAllocator allocator, uint32_t w, uint32_t h, VkFormat colorFmt, VkFormat depthFmt) {

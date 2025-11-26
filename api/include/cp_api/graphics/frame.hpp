@@ -17,9 +17,10 @@ namespace cp_api {
     struct CameraWork {
         uint32_t cameraEntityId = 0;
         uint32_t width = 0;
-        uint32_t height = 0;
-        VkFormat colorFormat = VK_FORMAT_UNDEFINED;
+        uint32_t height = 0;      
+        VkFormat colorFormat = VK_FORMAT_UNDEFINED;  
         VkFormat depthFormat = VK_FORMAT_UNDEFINED;
+        VkFormat stencilFormat = VK_FORMAT_UNDEFINED;
         
         std::array<WorkerCmdData, MAX_WORKERS_PER_CAMERA> workers;
     };

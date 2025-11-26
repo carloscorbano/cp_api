@@ -97,7 +97,6 @@ namespace cp_api::physics2D {
 
             if (tmin < 0.0f) tmin = 0.0f;
 
-            hit.hit = true;
             hit.distance = tmin;
             hit.fraction = tmin / tMax;
             hit.point = ray.GetPoint(tmin);
@@ -244,7 +243,6 @@ namespace cp_api::physics3D {
             if (tmin < 0.0f)
                 tmin = 0.0f;
 
-            hit.hit = true;
             hit.distance = tmin;
             hit.fraction = tmin / tMax;
             hit.point = ray.GetPoint(tmin);
