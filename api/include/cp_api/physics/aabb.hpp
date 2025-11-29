@@ -4,10 +4,10 @@
 
 namespace cp_api::physics2D {
         struct AABB {
-        cp_api::math::Vec2 min, max;
+        Vec2 min, max;
 
         AABB() = default;
-        AABB(const cp_api::math::Vec2& mi, const cp_api::math::Vec2& ma) {
+        AABB(const Vec2& mi, const Vec2& ma) {
             min.x = std::min(mi.x, ma.x);
             min.y = std::min(mi.y, ma.y);
             max.x = std::max(mi.x, ma.x);
@@ -15,13 +15,13 @@ namespace cp_api::physics2D {
         }
 
         // --- Utilitários ---
-        cp_api::math::Vec2 Center() const { return cp_api::math::Vec2((min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f); }
-        bool Contains(const cp_api::math::Vec2& p) const { return p.x >= min.x && p.x <= max.x && p.y >= min.y && p.y <= max.y; }
+        Vec2 Center() const { return Vec2((min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f); }
+        bool Contains(const Vec2& p) const { return p.x >= min.x && p.x <= max.x && p.y >= min.y && p.y <= max.y; }
 
-        cp_api::math::Vec2 Min() const { return min; }
-        cp_api::math::Vec2 Max() const { return max; }
+        Vec2 Min() const { return min; }
+        Vec2 Max() const { return max; }
 
-        cp_api::math::Vec2 GetHalfSize() const { return (max - min) * 0.5f; }
+        Vec2 GetHalfSize() const { return (max - min) * 0.5f; }
 
         bool Contains(const AABB& other) const {
             return (other.min.x >= min.x && other.max.x <= max.x) &&
@@ -102,7 +102,7 @@ namespace cp_api::physics2D {
             hit.point = ray.GetPoint(tmin);
             hit.penetration = 0.0f;
 
-            cp_api::math::Vec2 normal(0, 0);
+            Vec2 normal(0, 0);
             float eps = 1e-4f;
             if (fabs(hit.point.x - min.x) < eps) normal.x = -1;
             else if (fabs(hit.point.x - max.x) < eps) normal.x = 1;
@@ -123,11 +123,11 @@ namespace cp_api::physics2D {
 namespace cp_api::physics3D {
 
     struct AABB {
-        cp_api::math::Vec3 min, max;
+        Vec3 min, max;
         void* userData = nullptr;    // ponteiro para o dono do AABB (ex: entidade, collider, etc.)
 
         AABB() = default;
-        AABB(const cp_api::math::Vec3& mi, const cp_api::math::Vec3& ma, void* data = nullptr) {
+        AABB(const Vec3& mi, const Vec3& ma, void* data = nullptr) {
             min.x = std::min(mi.x, ma.x);
             min.y = std::min(mi.y, ma.y);
             min.z = std::min(mi.z, ma.z);
@@ -139,21 +139,21 @@ namespace cp_api::physics3D {
         // -------------------------------
         // Utilitários básicos
         // -------------------------------
-        cp_api::math::Vec3 Center() const {
-            return cp_api::math::Vec3((min.x + max.x) * 0.5f,
+        Vec3 Center() const {
+            return Vec3((min.x + max.x) * 0.5f,
                         (min.y + max.y) * 0.5f,
                         (min.z + max.z) * 0.5f);
         }
 
-        cp_api::math::Vec3 Extents() const { return (max - min) * 0.5f; }
-        cp_api::math::Vec3 Size() const { return max - min; }
+        Vec3 Extents() const { return (max - min) * 0.5f; }
+        Vec3 Size() const { return max - min; }
 
-        cp_api::math::Vec3 Min() const { return min; }
-        cp_api::math::Vec3 Max() const { return max; }
+        Vec3 Min() const { return min; }
+        Vec3 Max() const { return max; }
 
-        cp_api::math::Vec3 GetHalfSize() const { return (max - min) * 0.5f; }
+        Vec3 GetHalfSize() const { return (max - min) * 0.5f; }
 
-        bool Contains(const cp_api::math::Vec3& p) const {
+        bool Contains(const Vec3& p) const {
             return (p.x >= min.x && p.x <= max.x &&
                     p.y >= min.y && p.y <= max.y &&
                     p.z >= min.z && p.z <= max.z);
@@ -209,7 +209,7 @@ namespace cp_api::physics3D {
         // -------------------------------
         bool Intersects(const Ray& ray, HitInfo& hit, float tMax) const {
             float tmin = 0.0f, tmax = tMax;
-            cp_api::math::Vec3 normal(0, 0, 0);
+            Vec3 normal(0, 0, 0);
             int hitAxis = -1;
 
             // Teste de interseção com slab em cada eixo (AABB)

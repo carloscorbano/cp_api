@@ -5,17 +5,17 @@
 
 namespace cp_api::shapes2D {
     struct Capsule {
-        cp_api::math::Vec2 p0;
-        cp_api::math::Vec2 p1;
+        Vec2 p0;
+        Vec2 p1;
         float radius;
 
         Capsule() = default;
-        Capsule(cp_api::math::Vec2 p0, cp_api::math::Vec2 p1, float radius)
+        Capsule(Vec2 p0, Vec2 p1, float radius)
             : p0(p0), p1(p1), radius(radius) {}
 
         cp_api::physics2D::AABB GetAABB() const {
-            cp_api::math::Vec2 minPt = glm::min(p0, p1) - cp_api::math::Vec2(radius);
-            cp_api::math::Vec2 maxPt = glm::max(p0, p1) + cp_api::math::Vec2(radius);
+            Vec2 minPt = glm::min(p0, p1) - Vec2(radius);
+            Vec2 maxPt = glm::max(p0, p1) + Vec2(radius);
             return {minPt, maxPt};
         }
 
@@ -55,18 +55,18 @@ namespace cp_api::shapes2D {
 namespace cp_api::shapes3D {
 
     struct Capsule {
-        cp_api::math::Vec3 p0;    // extremidade 1
-        cp_api::math::Vec3 p1;    // extremidade 2
+        Vec3 p0;    // extremidade 1
+        Vec3 p1;    // extremidade 2
         float radius;
 
         Capsule() = default;
-        Capsule(cp_api::math::Vec3 p0, cp_api::math::Vec3 p1, float radius)
+        Capsule(Vec3 p0, Vec3 p1, float radius)
             : p0(p0), p1(p1), radius(radius) {}
 
         // --- Retorna AABB que envolve a cápsula ---
         cp_api::physics3D::AABB GetAABB() const {
-            cp_api::math::Vec3 minPt = glm::min(p0, p1) - cp_api::math::Vec3(radius);
-            cp_api::math::Vec3 maxPt = glm::max(p0, p1) + cp_api::math::Vec3(radius);
+            Vec3 minPt = glm::min(p0, p1) - Vec3(radius);
+            Vec3 maxPt = glm::max(p0, p1) + Vec3(radius);
             return {minPt, maxPt};
         }
 

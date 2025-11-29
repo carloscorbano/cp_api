@@ -13,7 +13,8 @@
 #include "cp_api/components/transformComponent.hpp"
 #include "cp_api/components/rendererComponent.hpp"
 
-#include "cp_api/graphics/vkBuffer.hpp"
+#include "cp_api/core/filesystem.hpp"
+#include "cp_api/graphics/vertex.hpp"
 
 namespace cp_api {
     Framework::Framework() {
@@ -67,23 +68,7 @@ namespace cp_api {
         //-----------------------------------------------------------------------------------
         // TEST AREA
         //-----------------------------------------------------------------------------------
-        auto& vk = m_window->GetVulkan();
 
-        std::vector<uint32_t> indices = { 0, 1, 2, 3, 4, 5};
-
-        VulkanBuffer indexBuffer(vk.GetVmaAllocator(),
-            sizeof(uint32_t) * indices.size(),
-            VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-            VMA_MEMORY_USAGE_CPU_TO_GPU,
-            false);
-
-        indexBuffer.Upload(vk.GetDevice(), vk.GetSingleTimeCommandPool(), vk.GetQueue(QueueType::GRAPHICS), indices.data(), sizeof(uint32_t) * indices.size(), true);
-
-        indexBuffer.Map();
-
-        // vkCmdBindIndexBuffer(cmd, indexBuffer.GetBuffer(), 0, VK_INDEX_TYPE_UINT32);
-
-        indexBuffer.destroy();
         //-----------------------------------------------------------------------------------
         // END OF TEST AREA
         //-----------------------------------------------------------------------------------
@@ -126,6 +111,30 @@ namespace cp_api {
             m_diagnostics->StartTimer("WorldUpdate");
             {
                 m_world->Update(dt);
+                auto camView = reg.view<TransformComponent, CameraComponent>();
+                if(m_window->GetInput().isKeyDown(GLFW_KEY_A)) {
+                    for(auto [e, tc, cc] : camView.each()) {
+                        tc.Translate(Vec3(1.0f, 0.0f, 0.0f), (float)dt * 10.0f);
+                    }
+                }
+
+                if(m_window->GetInput().isKeyDown(GLFW_KEY_D)) {
+                    for(auto [e, tc, cc] : camView.each()) {
+                        tc.Translate(Vec3(-1.0f, 0.0f, 0.0f), (float)dt * 10.0f);
+                    }
+                }
+
+                if(m_window->GetInput().isKeyDown(GLFW_KEY_W)) {
+                    for(auto [e, tc, cc] : camView.each()) {
+                        tc.Translate(Vec3(0.0f, 0.0f, 1.0f), (float)dt * 10.0f);
+                    }
+                }
+
+                if(m_window->GetInput().isKeyDown(GLFW_KEY_S)) {
+                    for(auto [e, tc, cc] : camView.each()) {
+                        tc.Translate(Vec3(0.0f, 0.0f, -1.0f), (float)dt * 10.0f);
+                    }
+                }
             }
             m_diagnostics->StopTimer("WorldUpdate");
 

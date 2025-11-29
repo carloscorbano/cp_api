@@ -36,7 +36,7 @@ namespace cp_api {
         float moveSpeed = 5.0f;
         float lookSpeed = 0.1f;
 
-        math::Mat4 GetProjectionMatrix() const {
+        Mat4 GetProjectionMatrix() const {
             glm::mat4 proj;
 
             if (type == CameraType::Perspective) {
@@ -46,27 +46,24 @@ namespace cp_api {
                 proj = glm::ortho(-half * aspect, half * aspect, -half, half, zNear, zFar);
             }
 
-            proj[1][1] *= -1.0f; // necessário para Vulkan
+            proj[1][1] *= -1.0f; // Vulkan flip
 
             return proj;
         }
 
-        math::Mat4 GetViewMatrix(const math::Vec3& pos, const math::Quat& rot, const math::Vec3& scale) const {
-            // matriz de model
-            math::Mat4 T = glm::translate(glm::mat4(1.0f), pos);
-            math::Mat4 R = glm::mat4_cast(rot);
-            math::Mat4 S = glm::scale(glm::mat4(1.0f), scale);
+        Mat4 GetViewMatrix(const Vec3& pos, const Quat& rot, const Vec3&) const {
+            glm::mat4 T = glm::translate(glm::mat4(1.0f), pos);
+            glm::mat4 R = glm::mat4_cast(glm::normalize(rot));
 
-            math::Mat4 model = T * R * S;
+            glm::mat4 model = T * R;
 
-            // View matrix é a inversa
             return glm::inverse(model);
         }
 
-        math::Mat4 GetViewMatrix(const math::Vec3& position, const math::Vec3& forward, const math::Vec3& up) const {
-            math::Vec3 eye    = position;
-            math::Vec3 center = position + forward; 
-            math::Vec3 upv    = up;
+        Mat4 GetViewMatrix(const Vec3& position, const Vec3& forward, const Vec3& up) const {
+            Vec3 eye    = position;
+            Vec3 center = position + forward; 
+            Vec3 upv    = up;
 
             return glm::lookAt(eye, center, upv);
         }

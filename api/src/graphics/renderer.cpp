@@ -2,6 +2,7 @@
 #include "cp_api/graphics/window.hpp"
 #include "cp_api/graphics/vulkan.hpp"
 #include "cp_api/graphics/renderTargetManager.hpp"
+
 #include "cp_api/core/threadPool.hpp"
 #include "cp_api/core/debug.hpp"
 
@@ -49,7 +50,6 @@ namespace cp_api {
         destroyCommandResources();
         destroyMainCamera();
         destroyFrames();
-        destroyGlobalDescriptorPool();
         CP_LOG_SUCCESS("Successfully destroyed renderer object!");
     }
 
@@ -70,7 +70,7 @@ namespace cp_api {
         std::vector<WorkerFuture> workerFutures;
 
         for (auto [e, tc, cc] : camView.each()) {
-            if(!cc.active) return;
+            if(!cc.active) continue;
 
             uint32_t id = static_cast<uint32_t>(e);
             CameraWork& frameCW = frame.cameraWorks[id];
@@ -84,7 +84,7 @@ namespace cp_api {
             // --------------------
             // 1) CULLING 
             // --------------------
-            math::Mat4 vp = cc.GetProjectionMatrix() * cc.GetViewMatrix(tc.position, tc.rotation, tc.scale);
+            Mat4 vp = cc.GetProjectionMatrix() * cc.GetViewMatrix(tc.position, tc.rotation, tc.scale);
             shapes3D::Frustum frustum = shapes3D::Frustum::FromMatrix(vp);
             std::vector<physics3D::HitInfo> hits;
             world.QueryFrustum(frustum, hits, cc.viewMask);
@@ -95,91 +95,156 @@ namespace cp_api {
             // --------------------
             // ) ASYNC WORK 
             // --------------------
-            for (uint32_t i = 0; i < MAX_WORKERS_PER_CAMERA; ++i) {
-                auto task = m_threadPool.Submit(TaskPriority::HIGH,
-                    [](Frame& frame, CameraWork& camWork, const uint32_t& workerIndex, std::span<const physics3D::HitInfo> hits, const uint32_t& maxWorkers, entt::registry* registry, glm::mat4& vp) -> VkResult {
-                        WorkerCmdData& wcd = camWork.workers[workerIndex];
-                        VkCommandBuffer cb = wcd.cb;
+            auto& camWork = frame.cameraWorks[m_mainCameraUID];
+            auto& wcd = camWork.workers[0];
+            auto& cb = wcd.cb;
 
-                        VkCommandBufferInheritanceRenderingInfo inhRendering{};
-                        inhRendering.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_RENDERING_INFO;
-                        inhRendering.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-                        inhRendering.colorAttachmentCount = 1;
-                        inhRendering.pColorAttachmentFormats = &camWork.colorFormat;
-                        inhRendering.depthAttachmentFormat = camWork.depthFormat;
-                        inhRendering.stencilAttachmentFormat = camWork.stencilFormat;
+            VkCommandBufferInheritanceRenderingInfo inhRendering{};
+            inhRendering.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_RENDERING_INFO;
+            inhRendering.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+            inhRendering.colorAttachmentCount = 1;
+            inhRendering.pColorAttachmentFormats = &camWork.colorFormat;
+            inhRendering.depthAttachmentFormat = camWork.depthFormat;
+            inhRendering.stencilAttachmentFormat = camWork.stencilFormat;
 
-                        VkCommandBufferInheritanceInfo inh{};
-                        inh.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO;
-                        inh.pNext = &inhRendering;
-                        inh.framebuffer = VK_NULL_HANDLE;
+            VkCommandBufferInheritanceInfo inh{};
+            inh.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO;
+            inh.pNext = &inhRendering;
+            inh.framebuffer = VK_NULL_HANDLE;
 
-                        VkCommandBufferBeginInfo beginInfo{};
-                        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-                        beginInfo.flags = VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT | VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-                        beginInfo.pInheritanceInfo = &inh;
+            VkCommandBufferBeginInfo beginInfo{};
+            beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+            beginInfo.flags = VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT | VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+            beginInfo.pInheritanceInfo = &inh;
 
-                        if(vkBeginCommandBuffer(cb, &beginInfo) != VK_SUCCESS) {
-                            CP_LOG_THROW("Failed to begin command buffer!");
-                        }
-
-                        // --------------------
-                        // VIEWPORT / SCISSOR
-                        // --------------------
-                        VkExtent2D e {};
-                        e.width = camWork.width;
-                        e.height = camWork.height;
-
-                        CP_LOG_WARN("{} {}", e.width, e.height);
-
-                        VkViewport viewport{};
-                        viewport.x = 0.f;
-                        viewport.y = 0.f;
-                        viewport.width  = static_cast<float>(e.width);
-                        viewport.height = static_cast<float>(e.height);
-                        viewport.minDepth = 0.f;
-                        viewport.maxDepth = 1.f;
-
-                        vkCmdSetViewport(cb, 0, 1, &viewport);
-
-                        VkRect2D scissor{};
-                        scissor.offset = {0, 0};
-                        scissor.extent = e;
-
-                        vkCmdSetScissor(cb, 0, 1, &scissor);
-
-                        // --------------------
-                        // DRAW PASS
-                        // --------------------
-                        uint32_t curHitIndex = 0;
-                        while(curHitIndex < hits.size()) {
-                            auto& curHit = hits[curHitIndex];
-                            curHitIndex += maxWorkers;
-
-                            //get hit entity
-                            auto [tc, rc] = registry->try_get<TransformComponent, RendererComponent>((entt::entity)curHit.id);
-                            if(!tc || !rc) continue;
-                            
-                            math::Mat4 model = tc->GetWorldMatrix();
-
-                            //camera data
-                            rc->Draw(cb, model, vp, curHit.distance);
-                        }
-
-                        return vkEndCommandBuffer(cb);
-                    }, frame, frameCW, i, hits, MAX_WORKERS_PER_CAMERA, &reg, vp);
-
-                workerFutures.push_back( WorkerFuture{id, i, std::move(task)} );
+            if(vkBeginCommandBuffer(cb, &beginInfo) != VK_SUCCESS) {
+                CP_LOG_THROW("Failed to begin command buffer!");
             }
+
+            // --------------------
+            // VIEWPORT / SCISSOR
+            // --------------------
+            VkExtent2D e {};
+            e.width = camWork.width;
+            e.height = camWork.height;
+
+            VkViewport viewport{};
+            viewport.x = 0.f;
+            viewport.y = 0.f;
+            viewport.width  = static_cast<float>(e.width);
+            viewport.height = static_cast<float>(e.height);
+            viewport.minDepth = 0.f;
+            viewport.maxDepth = 1.f;
+
+            vkCmdSetViewport(cb, 0, 1, &viewport);
+
+            VkRect2D scissor{};
+            scissor.offset = {0, 0};
+            scissor.extent = e;
+
+            vkCmdSetScissor(cb, 0, 1, &scissor);
+
+            PCPush push{};
+            push.viewProj = vp;
+
+            for(uint32_t i = 0; i < (uint32_t)hits.size(); ++i) {
+                //get hit entity
+                auto [otc, orc] = reg.try_get<TransformComponent, RendererComponent>((entt::entity)hits[i].id);
+                if(!otc || !orc || !orc->visible) continue;
+                
+                Mat4 model = otc->GetWorldMatrix();
+                push.model = model;
+                push.objectID = orc->objectID;
+
+                auto& hitInfo = hits[i];
+                CP_LOG_WARN("cam x {} y {} z {} - drawing object id {} distance: {}", tc.position.x, tc.position.y, tc.position.z, orc->objectID, hitInfo.distance);
+            }
+
+            vkEndCommandBuffer(cb);
+
+            // for (uint32_t i = 0; i < MAX_WORKERS_PER_CAMERA; ++i) {
+            //     auto task = m_threadPool.Submit(TaskPriority::HIGH,
+            //         [](Frame& frame, CameraWork& camWork, const uint32_t& workerIndex, std::span<const physics3D::HitInfo> hits, const uint32_t& maxWorkers, entt::registry* registry, glm::mat4& vp) -> VkResult {
+            //             WorkerCmdData& wcd = camWork.workers[workerIndex];
+            //             VkCommandBuffer cb = wcd.cb;
+
+            //             VkCommandBufferInheritanceRenderingInfo inhRendering{};
+            //             inhRendering.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_RENDERING_INFO;
+            //             inhRendering.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+            //             inhRendering.colorAttachmentCount = 1;
+            //             inhRendering.pColorAttachmentFormats = &camWork.colorFormat;
+            //             inhRendering.depthAttachmentFormat = camWork.depthFormat;
+            //             inhRendering.stencilAttachmentFormat = camWork.stencilFormat;
+
+            //             VkCommandBufferInheritanceInfo inh{};
+            //             inh.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO;
+            //             inh.pNext = &inhRendering;
+            //             inh.framebuffer = VK_NULL_HANDLE;
+
+            //             VkCommandBufferBeginInfo beginInfo{};
+            //             beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+            //             beginInfo.flags = VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT | VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+            //             beginInfo.pInheritanceInfo = &inh;
+
+            //             if(vkBeginCommandBuffer(cb, &beginInfo) != VK_SUCCESS) {
+            //                 CP_LOG_THROW("Failed to begin command buffer!");
+            //             }
+
+            //             // --------------------
+            //             // VIEWPORT / SCISSOR
+            //             // --------------------
+            //             VkExtent2D e {};
+            //             e.width = camWork.width;
+            //             e.height = camWork.height;
+
+            //             VkViewport viewport{};
+            //             viewport.x = 0.f;
+            //             viewport.y = 0.f;
+            //             viewport.width  = static_cast<float>(e.width);
+            //             viewport.height = static_cast<float>(e.height);
+            //             viewport.minDepth = 0.f;
+            //             viewport.maxDepth = 1.f;
+
+            //             vkCmdSetViewport(cb, 0, 1, &viewport);
+
+            //             VkRect2D scissor{};
+            //             scissor.offset = {0, 0};
+            //             scissor.extent = e;
+
+            //             vkCmdSetScissor(cb, 0, 1, &scissor);
+
+            //             // --------------------
+            //             // DRAW PASS
+            //             // --------------------
+            //             uint32_t curHitIndex = 0;
+            //             while(curHitIndex < hits.size()) {
+            //                 auto& curHit = hits[curHitIndex];
+            //                 curHitIndex += maxWorkers;
+
+            //                 //get hit entity
+            //                 auto [tc, rc] = registry->try_get<TransformComponent, RendererComponent>((entt::entity)curHit.id);
+            //                 if(!tc || !rc) continue;
+                            
+            //                 math::Mat4 model = tc->GetWorldMatrix();
+
+            //                 //camera data
+            //                 rc->Draw(cb, model, vp, curHit.distance);
+            //             }
+
+            //             return vkEndCommandBuffer(cb);
+            //         }, frame, frameCW, i, hits, MAX_WORKERS_PER_CAMERA, &reg, vp);
+
+            //     workerFutures.push_back( WorkerFuture{id, i, std::move(task)} );
+            // }
         }
 
         // Espera todos workers completarem gravação
-        for (auto &wf : workerFutures) {
-            VkResult rr = wf.fut.get();
-            if (rr != VK_SUCCESS) {
-                CP_LOG_THROW("Worker failed to record secondary CB");
-            }
-        }
+        // for (auto &wf : workerFutures) {
+        //     VkResult rr = wf.fut.get();
+        //     if (rr != VK_SUCCESS) {
+        //         CP_LOG_THROW("Worker failed to record secondary CB");
+        //     }
+        // }
 
         //-----------------------------------------------------------------
         // IMGUI
@@ -508,8 +573,7 @@ namespace cp_api {
 
 #pragma region INITIALIZATION_METHODS
     void Renderer::createGlobalDescriptorPool() {
-        VkDescriptorPoolSize pool_sizes[] =
-        {
+        std::vector<VkDescriptorPoolSize> sizes = {
             { VK_DESCRIPTOR_TYPE_SAMPLER, 1000 },
             { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000 },
             { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1000 },
@@ -523,23 +587,7 @@ namespace cp_api {
             { VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1000 }
         };
 
-        VkDescriptorPoolCreateInfo pool_info = {};
-        pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-        pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-        pool_info.maxSets = 1000 * IM_ARRAYSIZE(pool_sizes);
-        pool_info.poolSizeCount = (uint32_t)IM_ARRAYSIZE(pool_sizes);
-        pool_info.pPoolSizes = pool_sizes;
-        
-        if (vkCreateDescriptorPool(m_vulkan.GetDevice(), &pool_info, nullptr, &g_descriptorPool) != VK_SUCCESS) {
-            CP_LOG_THROW("Failed to create global descriptor pool!");
-        }
-    }
-
-    void Renderer::destroyGlobalDescriptorPool() {
-        if(g_descriptorPool != VK_NULL_HANDLE) {
-            vkDestroyDescriptorPool(m_vulkan.GetDevice(), g_descriptorPool, nullptr);
-            g_descriptorPool = VK_NULL_HANDLE;
-        }
+        g_descriptorPool.create(m_vulkan.GetDevice(), 1000, sizes, VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT);
     }
 
     void Renderer::createFrames() {
@@ -616,7 +664,7 @@ namespace cp_api {
         auto& swp = m_vulkan.GetSwapchain();
         auto& reg = m_world.GetRegistry();
         auto mainCameraEntity = reg.create();
-        auto& camTransform = reg.emplace<TransformComponent>(mainCameraEntity, math::Vec3(0.0f), math::Quat(math::Vec3(0.0f)), math::Vec3(1.0f), physics3D::AABB(math::Vec3(0), math::Vec3(0)));
+        auto& camTransform = reg.emplace<TransformComponent>(mainCameraEntity, Vec3(0.0f, 0.0f, 5.0f), Quat(Vec3(0.0f, glm::radians(180.0f), 0.0f)), Vec3(1.0f), physics3D::AABB(Vec3(0), Vec3(0)));
         auto& camComponent = reg.emplace<CameraComponent>(mainCameraEntity, swp.extent.width, swp.extent.height, CameraType::Perspective);
         reg.emplace<DontDestroyOnLoad>(mainCameraEntity);
 
@@ -652,7 +700,7 @@ namespace cp_api {
         init_info.QueueFamily = m_vulkan.GetQueueFamilyIndices().graphicsFamily.value();
         init_info.Queue = m_vulkan.GetQueue(QueueType::GRAPHICS);
         init_info.PipelineCache = VK_NULL_HANDLE;
-        init_info.DescriptorPool = g_descriptorPool;
+        init_info.DescriptorPool = g_descriptorPool.get();
         init_info.Subpass = 0;
         init_info.MinImageCount = static_cast<uint32_t>(swp.images.size());
         init_info.ImageCount = static_cast<uint32_t>(swp.images.size());
@@ -874,6 +922,5 @@ namespace cp_api {
         }
     }
 
-    #pragma endregion INITIALIZATION_METHODS
-
+#pragma endregion INITIALIZATION_METHODS
 }

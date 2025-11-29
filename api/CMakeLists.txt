@@ -29,6 +29,9 @@ add_library(cp_api STATIC
     src/graphics/renderer.cpp
     src/graphics/renderTarget.cpp
     src/graphics/renderTargetManager.cpp
+    src/graphics/descriptorPool.cpp
+
+    src/components/transformComponent.cpp
     
     src/containers/ntree.cpp
     src/containers/spatialTree.cpp

@@ -48,7 +48,7 @@ namespace cp_api::shapes2D {
         }
 
         // === CONSTRUÇÃO A PARTIR DE MATRIZ VIEW-PROJECTION 2D (caso use glm::ortho) ===
-        static Frustum FromMatrix(const cp_api::math::Mat3& vpMatrix) {
+        static Frustum FromMatrix(const Mat3& vpMatrix) {
             // Converte o comportamento para 2D (usando apenas X/Y e offset de translado)
             // Aqui supomos que vpMatrix é [ [a b tx], [c d ty], [0 0 1] ]
             // Isso define uma transformação linear + deslocamento
@@ -64,7 +64,7 @@ namespace cp_api::shapes2D {
         // === TESTE DE INTERSEÇÃO COM AABB ===
         bool Intersects(const cp_api::physics2D::AABB& box) const {
             for (const auto& plane : planes) {
-                cp_api::math::Vec2 p = box.min;
+                Vec2 p = box.min;
                 if (plane.normal.x >= 0) p.x = box.max.x;
                 if (plane.normal.y >= 0) p.y = box.max.y;
                 if (glm::dot(plane.normal, p) + plane.distance < 0)
@@ -76,8 +76,8 @@ namespace cp_api::shapes2D {
         // === TESTE DE CONTENÇÃO TOTAL ===
         bool Contains(const cp_api::physics2D::AABB& box) const {
             for (const auto& plane : planes) {
-                cp_api::math::Vec2 n = plane.normal;
-                cp_api::math::Vec2 p = box.max;
+                Vec2 n = plane.normal;
+                Vec2 p = box.max;
                 if (n.x < 0) p.x = box.min.x;
                 if (n.y < 0) p.y = box.min.y;
                 if (glm::dot(n, p) + plane.distance < 0)
@@ -118,35 +118,47 @@ namespace cp_api::shapes3D {
         static Frustum FromMatrix(const glm::mat4& m) {
             Frustum f;
 
-            // Acesso às linhas da matriz manualmente
             glm::vec4 row0(m[0][0], m[1][0], m[2][0], m[3][0]);
             glm::vec4 row1(m[0][1], m[1][1], m[2][1], m[3][1]);
             glm::vec4 row2(m[0][2], m[1][2], m[2][2], m[3][2]);
             glm::vec4 row3(m[0][3], m[1][3], m[2][3], m[3][3]);
 
             // Left
-            f.planes[0].normal = glm::vec3(row3 + row0);
-            f.planes[0].distance = (row3 + row0).w;
+            glm::vec4 p = row3 + row0;
+            f.planes[0].normal   = glm::vec3(p);
+            f.planes[0].distance = p.w;
 
             // Right
-            f.planes[1].normal = glm::vec3(row3 - row0);
-            f.planes[1].distance = (row3 - row0).w;
+            p = row3 - row0;
+            f.planes[1].normal   = glm::vec3(p);
+            f.planes[1].distance = p.w;
 
             // Top
-            f.planes[2].normal = glm::vec3(row3 - row1);
-            f.planes[2].distance = (row3 - row1).w;
+            p = row3 - row1;
+            f.planes[2].normal   = glm::vec3(p);
+            f.planes[2].distance = p.w;
 
             // Bottom
-            f.planes[3].normal = glm::vec3(row3 + row1);
-            f.planes[3].distance = (row3 + row1).w;
+            p = row3 + row1;
+            f.planes[3].normal   = glm::vec3(p);
+            f.planes[3].distance = p.w;
 
             // Near
-            f.planes[4].normal = glm::vec3(row3 + row2);
-            f.planes[4].distance = (row3 + row2).w;
+            p = row3 + row2;
+            f.planes[4].normal   = glm::vec3(p);
+            f.planes[4].distance = p.w;
 
             // Far
-            f.planes[5].normal = glm::vec3(row3 - row2);
-            f.planes[5].distance = (row3 - row2).w;
+            p = row3 - row2;
+            f.planes[5].normal   = glm::vec3(p);
+            f.planes[5].distance = p.w;
+
+            // 🔥 Normaliza os planos corretamente
+            for (int i = 0; i < 6; i++) {
+                float len = glm::length(f.planes[i].normal);
+                f.planes[i].normal /= len;
+                f.planes[i].distance /= len;
+            }
 
             return f;
         }
@@ -154,7 +166,7 @@ namespace cp_api::shapes3D {
         // === TESTE DE INTERSEÇÃO COM AABB ===
         bool Intersects(const cp_api::physics3D::AABB& box) const {
             for (const auto& plane : planes) {
-                cp_api::math::Vec3 p = box.min;
+                Vec3 p = box.min;
                 if (plane.normal.x >= 0) p.x = box.max.x;
                 if (plane.normal.y >= 0) p.y = box.max.y;
                 if (plane.normal.z >= 0) p.z = box.max.z;
@@ -169,8 +181,8 @@ namespace cp_api::shapes3D {
         // === TESTE DE VISIBILIDADE TOTAL (AABB totalmente dentro) ===
         bool Contains(const cp_api::physics3D::AABB& box) const {
             for (const auto& plane : planes) {
-                cp_api::math::Vec3 n = plane.normal;
-                cp_api::math::Vec3 p = box.max;
+                Vec3 n = plane.normal;
+                Vec3 p = box.max;
                 if (n.x < 0) p.x = box.min.x;
                 if (n.y < 0) p.y = box.min.y;
                 if (n.z < 0) p.z = box.min.z;

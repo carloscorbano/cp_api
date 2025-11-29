@@ -6,7 +6,7 @@
 #include "cp_api/shapes/frustum.hpp"
 #include "aabb.hpp"
 
-class SpatialTree2D : public cp_api::SpatialTree<cp_api::math::Vec2, cp_api::physics2D::AABB, cp_api::physics2D::Ray, cp_api::physics2D::HitInfo, 4> {
+class SpatialTree2D : public cp_api::SpatialTree<Vec2, cp_api::physics2D::AABB, cp_api::physics2D::Ray, cp_api::physics2D::HitInfo, 4> {
 public:
     void QueryCircle(const cp_api::shapes2D::Circle& circle, std::vector<uint32_t>& outIds, uint32_t queryMask = 0xFFFFFFFF) const;
     void QueryCircle(const cp_api::shapes2D::Circle& circle, std::vector<cp_api::physics2D::HitInfo>& outInfos, uint32_t queryMask = 0xFFFFFFFF) const;

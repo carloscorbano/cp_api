@@ -4,7 +4,7 @@
 
 namespace cp_api {
     World::World() 
-        : m_worldSpace(physics3D::AABB(math::Vec3(-10'000), math::Vec3(10'000))) {
+        : m_worldSpace(physics3D::AABB(Vec3(-10'000), Vec3(10'000))) {
 
         setupCallbacks();
     }
@@ -27,6 +27,19 @@ namespace cp_api {
 
     void World::onTransformAddCallback(entt::registry& reg, entt::entity e) {
         TransformComponent& tc = reg.get<TransformComponent>(e);
+        tc.m_entityID = (uint32_t)e;
+        tc.onTransformChangedCallback = [&](uint32_t& id, 
+            const Vec3& oldPos,
+            const Quat& oldRot, 
+            const Vec3& oldScale, 
+            const Vec3& newPos, 
+            const Quat& newQuat, 
+            const Vec3& newScale, 
+            const physics3D::AABB& oldBoundary, 
+            const physics3D::AABB& newBoundary) {
+                m_worldSpace.Update(id, oldBoundary, newBoundary);
+        };
+
         physics3D::AABB b(tc.position - tc.boundary.Min(), tc.position + tc.boundary.Max());
         m_worldSpace.Insert((uint32_t)e, b, nullptr);
     }

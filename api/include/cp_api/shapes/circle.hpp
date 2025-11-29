@@ -5,11 +5,11 @@
 
 namespace cp_api::shapes2D {
     struct Circle {
-        cp_api::math::Vec2 center;
+        Vec2 center;
         float radius;
 
         Circle() = default;
-        Circle(cp_api::math::Vec2 center, float radius) : center(center), radius(radius) {}
+        Circle(Vec2 center, float radius) : center(center), radius(radius) {}
 
         bool Intersects(const cp_api::physics2D::AABB& bounds) const {
             // ponto mais próximo do centro dentro do AABB

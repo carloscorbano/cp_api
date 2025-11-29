@@ -19,11 +19,12 @@ namespace cp_api {
     };
 
     struct MeshData {
-        VulkanBuffer vertexBuffer;
-        VulkanBuffer indexBuffer;
+        std::shared_ptr<VulkanBuffer> vbo_wrapper; // guarda wrapper para manter vivo
+        std::shared_ptr<VulkanBuffer> ibo_wrapper;
+        VkBuffer vertexBuffer = VK_NULL_HANDLE;
+        VkBuffer indexBuffer  = VK_NULL_HANDLE;
         uint32_t vertexCount  = 0;
         uint32_t indexCount   = 0;
-
         std::vector<Submesh> submeshes;
     };
 
@@ -36,15 +37,10 @@ namespace cp_api {
         uint32_t flags = 0;
     };
 
-    // Push constant para transform ou outro dado pequeno
-    struct PCObject {
-        glm::mat4 model;
-        uint32_t objectID;
-    };
-
     struct PCPush {
         glm::mat4 model;
         glm::mat4 viewProj;
+        uint32_t objectID;
     };
 
     // LOD system
@@ -87,89 +83,92 @@ namespace cp_api {
         // -----------------------------------------------------------------------------
         // Draw — compatível com Command Buffers Secundários + Dynamic Rendering
         // -----------------------------------------------------------------------------
-       void Draw(
-            VkCommandBuffer cb,
-            const glm::mat4& modelMatrix,
-            const glm::mat4& viewProj,     // NOVO: viewProj da câmera
-            float distanceToCamera
-        ) const 
-        {
-            if(!visible || lods.empty()) return;
+    //    void Draw(
+    //         VkCommandBuffer cb,
+    //         const glm::mat4& modelMatrix,
+    //         const glm::mat4& viewProj,     // NOVO: viewProj da câmera
+    //         float distanceToCamera
+    //     ) const 
+    //     {
+    //         if(!visible || lods.empty()) return;
 
-            MeshData* mesh = SelectLOD(distanceToCamera);
-            if(!mesh || mesh->vertexBuffer.GetBuffer() == VK_NULL_HANDLE) return;
+    //         MeshData* mesh = SelectLOD(distanceToCamera);
+    //         if(!mesh || mesh->vertexBuffer == VK_NULL_HANDLE) return;
 
-            // Bind vertex buffer
-            VkDeviceSize offset = 0;
-            VkBuffer vbuf = mesh->vertexBuffer.GetBuffer();
-            vkCmdBindVertexBuffers(cb, 0, 1, &vbuf, &offset);
+    //         // Bind vertex buffer
+    //         VkDeviceSize offset = 0;
+    //         VkBuffer vbuf = mesh->vertexBuffer;
+    //         vkCmdBindVertexBuffers(cb, 0, 1, &vbuf, &offset);
 
-            // Bind index buffer if existe
-            const bool hasIndex = (mesh->indexBuffer.GetBuffer() != VK_NULL_HANDLE && mesh->indexCount > 0);
-            if (hasIndex) {
-                vkCmdBindIndexBuffer(cb, mesh->indexBuffer.GetBuffer(), 0, VK_INDEX_TYPE_UINT32);
-            }
+    //         vkCmdSetCullMode(cb, VK_CULL_MODE_NONE);
 
-            // Prepare push constants (model + viewProj) — corresponde ao CreateTestPipeline (2 mat4)
-            PCPush pc{};
-            pc.model = modelMatrix;
-            pc.viewProj = viewProj;
+    //         // Bind index buffer if existe
+    //         const bool hasIndex = (mesh->indexBuffer != VK_NULL_HANDLE && mesh->indexCount > 0);
+    //         if (hasIndex) {
+    //             vkCmdBindIndexBuffer(cb, mesh->indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+    //         }
 
-            // Iterate submeshes
-            for (const auto& sub : mesh->submeshes)
-            {
-                if (sub.materialIndex >= materials.size()) continue;
-                const auto& mat = materials[sub.materialIndex];
-                if (mat.pipeline == VK_NULL_HANDLE) continue;
+    //         // Prepare push constants (model + viewProj) — corresponde ao CreateTestPipeline (2 mat4)
+    //         PCPush pc{};
+    //         pc.model = modelMatrix;
+    //         pc.viewProj = viewProj;
+    //         pc.objectID = objectID;
 
-                // Bind pipeline
-                vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, mat.pipeline);
+    //         // Iterate submeshes
+    //         for (const auto& sub : mesh->submeshes)
+    //         {
+    //             if (sub.materialIndex >= materials.size()) continue;
+    //             const auto& mat = materials[sub.materialIndex];
+    //             if (mat.pipeline == VK_NULL_HANDLE) continue;
 
-                // Bind descriptor set if present (descriptors must be bound inside SECONDARY)
-                if (mat.descriptor != VK_NULL_HANDLE) {
-                    vkCmdBindDescriptorSets(
-                        cb,
-                        VK_PIPELINE_BIND_POINT_GRAPHICS,
-                        mat.layout,
-                        0,              // firstSet
-                        1,              // descriptorCount
-                        &mat.descriptor,
-                        0,
-                        nullptr
-                    );
-                }
+    //             // Bind pipeline
+    //             vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, mat.pipeline);
 
-                // Push constants (model + viewProj)
-                vkCmdPushConstants(
-                    cb,
-                    mat.layout,
-                    VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                    0,
-                    sizeof(PCPush),
-                    &pc
-                );
+    //             // Bind descriptor set if present (descriptors must be bound inside SECONDARY)
+    //             if (mat.descriptor != VK_NULL_HANDLE) {
+    //                 vkCmdBindDescriptorSets(
+    //                     cb,
+    //                     VK_PIPELINE_BIND_POINT_GRAPHICS,
+    //                     mat.layout,
+    //                     0,              // firstSet
+    //                     1,              // descriptorCount
+    //                     &mat.descriptor,
+    //                     0,
+    //                     nullptr
+    //                 );
+    //             }
 
-                // Draw
-                if (hasIndex) {
-                    vkCmdDrawIndexed(
-                        cb,
-                        sub.indexCount,                            // indexCount for this submesh
-                        (instanceCount == 0 ? 1u : instanceCount),
-                        sub.indexOffset,                           // firstIndex (baseIndex)
-                        0,                                         // vertexOffset
-                        0                                          // firstInstance
-                    );
-                } else {
-                    vkCmdDraw(
-                        cb,
-                        mesh->vertexCount,
-                        (instanceCount == 0 ? 1u : instanceCount),
-                        0,
-                        0
-                    );
-                }
-            }
-        }
+    //             // Push constants (model + viewProj)
+    //             vkCmdPushConstants(
+    //                 cb,
+    //                 mat.layout,
+    //                 VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+    //                 0,
+    //                 sizeof(PCPush),
+    //                 &pc
+    //             );
+
+    //             // Draw
+    //             if (hasIndex) {
+    //                 vkCmdDrawIndexed(
+    //                     cb,
+    //                     sub.indexCount,                            // indexCount for this submesh
+    //                     (instanceCount == 0 ? 1u : instanceCount),
+    //                     sub.indexOffset,                           // firstIndex (baseIndex)
+    //                     0,                                         // vertexOffset
+    //                     0                                          // firstInstance
+    //                 );
+    //             } else {
+    //                 vkCmdDraw(
+    //                     cb,
+    //                     mesh->vertexCount,
+    //                     (instanceCount == 0 ? 1u : instanceCount),
+    //                     0,
+    //                     0
+    //                 );
+    //             }
+    //         }
+    //     }
     };
 
 } // namespace cp_api

@@ -7,6 +7,7 @@
 #include "frame.hpp"
 
 #include <entt/entt.hpp>
+#include "descriptorPool.hpp"
 
 namespace cp_api {
     class Window;
@@ -28,7 +29,7 @@ namespace cp_api {
 
         void Render();
 
-        VkDescriptorPool& GetGlobalDescriptorPool() { return g_descriptorPool; }
+        DescriptorPool& GetGlobalDescriptorPool() { return g_descriptorPool; }
         
     private:
         void submitThreadWork();
@@ -40,7 +41,6 @@ namespace cp_api {
 
         //initialization methods
         void createGlobalDescriptorPool();
-        void destroyGlobalDescriptorPool();
 
         void createFrames();
         void destroyFrames();
@@ -88,7 +88,7 @@ namespace cp_api {
         std::thread m_renderThreadWorker;
 
         //Descriptor pool
-        VkDescriptorPool g_descriptorPool = VK_NULL_HANDLE;
+        DescriptorPool g_descriptorPool;
 
         uint32_t m_mainCameraUID = 0;
         uint64_t m_frameCounter = 0;

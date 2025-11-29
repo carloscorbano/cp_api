@@ -3,7 +3,9 @@
 #include <vector>
 #include "glfw.inc.hpp"
 #include "renderTarget.hpp"
+#include "vkBuffer.hpp"
 #include <array>
+#include <memory>
 #include <unordered_map>
 
 namespace cp_api {

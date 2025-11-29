@@ -7,8 +7,8 @@
 
 void SpatialTree3D::QuerySphere(const cp_api::shapes3D::Sphere& sphere, std::vector<uint32_t>& outIds, uint32_t queryMask) const {
     cp_api::physics3D::AABB range(
-        sphere.center - cp_api::math::Vec3(sphere.radius, sphere.radius, sphere.radius),
-        sphere.center + cp_api::math::Vec3(sphere.radius, sphere.radius, sphere.radius)
+        sphere.center - Vec3(sphere.radius, sphere.radius, sphere.radius),
+        sphere.center + Vec3(sphere.radius, sphere.radius, sphere.radius)
     );
 
     std::vector<uint32_t> candidateIds;
@@ -260,8 +260,8 @@ void SpatialTree3D::QueryRay(const cp_api::physics3D::Ray& ray, std::vector<cp_a
 
     std::vector<uint32_t> ids;
     cp_api::physics3D::AABB rayBox(
-        ray.origin - cp_api::math::Vec3(maxDist, maxDist, maxDist),
-        ray.origin + cp_api::math::Vec3(maxDist, maxDist, maxDist)
+        ray.origin - Vec3(maxDist, maxDist, maxDist),
+        ray.origin + Vec3(maxDist, maxDist, maxDist)
     );
     this->QueryRange(rayBox, ids, queryMask);
 
