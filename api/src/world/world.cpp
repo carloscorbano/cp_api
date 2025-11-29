@@ -28,17 +28,10 @@ namespace cp_api {
     void World::onTransformAddCallback(entt::registry& reg, entt::entity e) {
         TransformComponent& tc = reg.get<TransformComponent>(e);
         tc.m_entityID = (uint32_t)e;
-        tc.onTransformChangedCallback = [&](uint32_t& id, 
-            const Vec3& oldPos,
-            const Quat& oldRot, 
-            const Vec3& oldScale, 
-            const Vec3& newPos, 
-            const Quat& newQuat, 
-            const Vec3& newScale, 
-            const physics3D::AABB& oldBoundary, 
-            const physics3D::AABB& newBoundary) {
-                m_worldSpace.Update(id, oldBoundary, newBoundary);
-        };
+
+        tc.onTransformEvents.Subscribe<onTransformChanged>([&](const onTransformChanged& event) {
+            m_worldSpace.Update(event.id, event.oldBoundary, event.newBoundary);
+        });
 
         physics3D::AABB b(tc.position - tc.boundary.Min(), tc.position + tc.boundary.Max());
         m_worldSpace.Insert((uint32_t)e, b, nullptr);

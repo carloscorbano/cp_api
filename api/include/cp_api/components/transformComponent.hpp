@@ -2,10 +2,23 @@
 
 #include "cp_api/core/math.hpp"
 #include "cp_api/physics/aabb.hpp"
+#include "cp_api/core/events.hpp"
 #include <functional>
 
 namespace cp_api {
     class World;
+    struct onTransformChanged : Event {
+        uint32_t id; 
+        Vec3 oldPos;
+        Quat oldRot;
+        Vec3 oldScale;
+        Vec3 newPos;
+        Quat newRot;
+        Vec3 newScale;
+        physics3D::AABB oldBoundary;
+        physics3D::AABB newBoundary;
+    };
+
     struct TransformComponent {
         friend class World;
         TransformComponent(const Vec3& position,
@@ -24,15 +37,23 @@ namespace cp_api {
         physics3D::AABB boundary;
 
         void Translate(Vec3 direction, float amount) {
-            TransformComponent oldTc = *this;
+            onTransformChanged otc{};
+            otc.id = m_entityID;
+            otc.oldPos = position;
+            otc.oldRot = rotation;
+            otc.oldScale = scale;
+            otc.oldBoundary = boundary;
 
             position += direction * amount;
             boundary.min += direction * amount;
             boundary.max += direction * amount;
 
-            if(onTransformChangedCallback) {
-                onTransformChangedCallback(this->m_entityID, oldTc.position, oldTc.rotation, oldTc.scale, this->position, this->rotation, this->scale, oldTc.boundary, this->boundary);
-            }
+            otc.newPos = position;
+            otc.newRot = rotation;
+            otc.newScale = scale;
+            otc.newBoundary = boundary;
+            
+            onTransformEvents.Emit<onTransformChanged>(otc);
         }
 
         Mat4 GetModelMatrix() const {
@@ -52,6 +73,6 @@ namespace cp_api {
         }
     private:
         uint32_t m_entityID;
-        std::function<void(uint32_t& id, const Vec3& oldPos, const Quat& oldRot, const Vec3& oldScale, const Vec3& newPos, const Quat& newQuat, const Vec3& newScale, const physics3D::AABB& oldBoundary, const physics3D::AABB& newBoundary)> onTransformChangedCallback;
+        EventDispatcher onTransformEvents;
     };
 } // namespace cp_api
